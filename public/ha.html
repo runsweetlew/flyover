@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flyover HA</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0e17; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; height: 100vh; overflow: hidden; position: relative; }
+    #map { width: 100%; height: 100%; }
+    .leaflet-control-attribution, .leaflet-control-zoom { display: none !important; }
+
+    .info-overlay {
+      position: absolute; bottom: 10px; left: 10px; right: 10px; z-index: 1000;
+      background: rgba(7,11,20,0.92); border: 1px solid rgba(26,37,64,0.6);
+      border-radius: 10px; padding: 12px 16px;
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .info-main { display: flex; gap: 12px; }
+    .info-content { flex: 1; min-width: 0; }
+    .info-photo {
+      width: 140px; height: 90px; border-radius: 6px; overflow: hidden;
+      background: #0d1525; flex-shrink: 0; border: 1px solid rgba(26,37,64,0.5);
+    }
+    .info-photo img { width: 100%; height: 100%; object-fit: cover; }
+    .info-photo-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #3e4c66; font-size: 0.7rem; }
+    .info-top { display: flex; justify-content: space-between; align-items: center; }
+    .info-flight { font-size: 1.5rem; font-weight: 800; color: #f59e0b; }
+    .info-status { font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; letter-spacing: 0.08em; }
+    .st-arriving { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .st-departing { background: rgba(16,185,129,0.15); color: #10b981; }
+    .st-area { background: rgba(139,92,246,0.1); color: #a78bfa; }
+    .st-transiting { background: rgba(100,116,139,0.1); color: #94a3b8; }
+    .info-sub { font-size: 0.85rem; color: #94a3b8; margin-top: 2px; }
+    .info-sub b { color: #e2e8f0; font-weight: 600; }
+    .info-route { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
+    .info-route b { color: #94a3b8; font-weight: 600; }
+    .info-stats { display: flex; gap: 16px; margin-top: 6px; flex-wrap: wrap; }
+    .info-stat { display: flex; flex-direction: column; }
+    .info-stat-val { font-size: 1.1rem; font-weight: 700; color: #f8fafc; }
+    .info-stat-val span { font-size: 0.65rem; color: #64748b; font-weight: 400; }
+    .info-stat-lbl { font-size: 0.6rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
+    .info-wx { display: flex; gap: 10px; align-items: center; padding-top: 6px; border-top: 1px solid rgba(26,37,64,0.5); }
+    .wx-badge { font-size: 0.75rem; font-weight: 800; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.06em; }
+    .wx-vfr { background: rgba(16,185,129,0.15); color: #10b981; }
+    .wx-mvfr { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .wx-ifr { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .wx-lifr { background: rgba(168,85,247,0.15); color: #a855f7; }
+    .wx-text { font-size: 0.7rem; color: #94a3b8; }
+    .info-count { font-size: 0.6rem; color: #64748b; }
+
+    .empty-msg { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(7,11,20,0.85); z-index: 500; }
+    .empty-msg.hidden { display: none; }
+    .empty-msg span { font-size: 2rem; opacity: 0.2; }
+    .empty-msg p { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
+    .scanning-bar { width: 80px; height: 2px; background: #1a2540; border-radius: 1px; margin-top: 8px; overflow: hidden; }
+    .scanning-bar::after { content:''; display:block; width:40%; height:100%; background:#3b82f6; animation: scan 1.5s ease-in-out infinite; }
+    @keyframes scan { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+
+    /* Map markers */
+    .home-marker { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5)); }
+    .plane-marker { display: flex; align-items: center; justify-content: center; }
+    .plane-marker svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+    .closest-marker-wrap { display: flex; flex-direction: column; align-items: center; }
+    .closest-plane { filter: drop-shadow(0 2px 6px rgba(245,158,11,0.5)); }
+    .closest-label-tag {
+      margin-top: 2px; padding: 1px 5px; border-radius: 3px;
+      background: rgba(245,158,11,0.9); color: #000; font-weight: 800;
+      font-size: 9px; letter-spacing: 0.04em; white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    }
+    .rwy-num { font-size: 8px; font-weight: 800; color: #94a3b8; letter-spacing: 0.04em; text-shadow: 0 1px 2px rgba(0,0,0,0.9); white-space: nowrap; }
+    .kgrr-text { font-size: 10px; font-weight: 800; color: #cbd5e1; letter-spacing: 0.1em; text-shadow: 0 1px 3px rgba(0,0,0,0.9); white-space: nowrap; }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div class="empty-msg" id="emptyMsg">
+  <span>&#9992;</span>
+  <p>Scanning for flights...</p>
+  <div class="scanning-bar"></div>
+</div>
+<div class="info-overlay" id="infoOverlay" style="display:none"></div>
+
+<script>
+const HOME = { lat: 42.8703, lon: -85.4666 };
+const KGRR = { lat: 42.8808, lon: -85.5228 };
+const RUNWAYS = [
+  { name1:'08R', lat1:42.8767, lon1:-85.5422, name2:'26L', lat2:42.8808, lon2:-85.5053, widthFt:150 },
+  { name1:'08L', lat1:42.8889, lon1:-85.5403, name2:'26R', lat2:42.8908, lon2:-85.5217, widthFt:100 },
+  { name1:'17',  lat1:42.8894, lon1:-85.5192, name2:'35',  lat2:42.8664, lon2:-85.5144, widthFt:150 },
+];
+
+let map, planeMarkers = {}, trailLines = [], trailPositions = {};
+let lastServerUpdate = null, lastClosestIcao = null;
+let cycleIndex = 0, cycleList = [], lastCycleTime = 0, lastData = null;
+const CYCLE_INTERVAL = 15000;
+
+// Aircraft classification (same as main page)
+const JET_PATH = 'M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z';
+function getPlaneCategory(tc) {
+  if (!tc) return 'jet-md';
+  const t = tc.toUpperCase();
+  if (['R44','R66','EC35','A139','S76','B429','B407','B206','B412','EC45','H125','H130','H135','H145','H160','S92','AS50'].includes(t)) return 'heli';
+  if (['B763','B764','B772','B77W','B788','B789','B78X','A332','A333','A339','A359','A35K','A388','B744','B748'].includes(t)) return 'jet-xl';
+  if (['B738','B73H','B739','B37M','B38M','B39M','B752','B753','A319','A320','A20N','A321','A21N'].includes(t)) return 'jet-lg';
+  if (['CRJ2','CRJ7','CRJ9','E75L','E75S','E170','E190','E195','E290','BCS1','BCS3'].includes(t)) return 'jet-md';
+  if (['C510','C525','C25A','C25B','C56X','C560','C680','C700','C750','LJ35','LJ45','LJ60','LJ75','GL5T','GLEX','GL7T','GLF4','GLF5','G280','G550','G650','CL30','CL35','CL60','H25B','FA50','FA7X','FA8X','E55P','PC24'].includes(t)) return 'bizjet';
+  if (['C208','B350','BE20','BE9L','PC12','TBM7','TBM8','TBM9','DHC6','AT72','DH8D'].includes(t)) return 'turbo';
+  if (['C172','C182','C206','C210','PA28','PA32','PA44','PA46','BE36','BE58','SR20','SR22','DA40','DA42','RV7','RV10'].includes(t)) return 'piston';
+  return 'jet-md';
+}
+const PLANE_SZ = { 'jet-xl':30, 'jet-lg':24, 'jet-md':20, 'bizjet':18, 'turbo':18, 'piston':14, 'heli':20 };
+const CLOSE_SZ = { 'jet-xl':38, 'jet-lg':32, 'jet-md':28, 'bizjet':26, 'turbo':26, 'piston':22, 'heli':28 };
+
+function makeIcon(color, size, tc) {
+  const cat = getPlaneCategory(tc);
+  if (cat === 'heli') {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
+      <rect x="2" y="4.5" width="20" height="2" rx="1" fill="${color}"/>
+      <rect x="11" y="4" width="2" height="4" fill="${color}"/>
+      <ellipse cx="12" cy="13" rx="4.5" ry="6" fill="${color}"/>
+      <rect x="16" y="12" width="6.5" height="1.8" rx=".9" fill="${color}"/>
+      <rect x="21.5" y="9.5" width="1.8" height="5.5" rx=".9" fill="${color}"/>
+    </svg>`;
+  }
+  if (cat === 'turbo' || cat === 'piston') {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}">
+      <circle cx="11.5" cy="1.5" r="2" opacity="0.5"/><path d="${JET_PATH}"/>
+    </svg>`;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}"><path d="${JET_PATH}"/></svg>`;
+}
+
+function altColor(alt) {
+  if (alt == null) return '#64748b';
+  if (alt < 2000) return '#ef4444';
+  if (alt < 5000) return '#f59e0b';
+  if (alt < 10000) return '#3b82f6';
+  return '#8b5cf6';
+}
+
+function computeRunwayCorners(lat1, lon1, lat2, lon2, widthFt) {
+  const avgLat = (lat1+lat2)/2, ftLat = 365223, ftLon = ftLat*Math.cos(avgLat*Math.PI/180);
+  const dlat = lat2-lat1, dlon = (lon2-lon1)*Math.cos(avgLat*Math.PI/180);
+  const h = Math.atan2(dlon, dlat), p = h+Math.PI/2, hw = widthFt/2;
+  const pLat = hw*Math.cos(p)/ftLat, pLon = hw*Math.sin(p)/ftLon;
+  return [[lat1+pLat,lon1+pLon],[lat1-pLat,lon1-pLon],[lat2-pLat,lon2-pLon],[lat2+pLat,lon2+pLon]];
+}
+
+function initMap() {
+  map = L.map('map', { zoomControl:false, attributionControl:false, dragging:false, scrollWheelZoom:false, doubleClickZoom:false, touchZoom:false, keyboard:false })
+    .setView([(HOME.lat+KGRR.lat)/2,(HOME.lon+KGRR.lon)/2], 11);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains:'abcd', maxZoom:19 }).addTo(map);
+
+  RUNWAYS.forEach(rwy => {
+    L.polygon(computeRunwayCorners(rwy.lat1,rwy.lon1,rwy.lat2,rwy.lon2,rwy.widthFt), { color:'#94a3b8', weight:1, fillColor:'#475569', fillOpacity:0.8 }).addTo(map);
+    [{t:rwy.name1,la:rwy.lat1,lo:rwy.lon1},{t:rwy.name2,la:rwy.lat2,lo:rwy.lon2}].forEach(l => {
+      L.marker([l.la,l.lo], { icon:L.divIcon({className:'',html:`<span class="rwy-num">${l.t}</span>`,iconSize:[24,12],iconAnchor:[12,6]}), zIndexOffset:850, interactive:false }).addTo(map);
+    });
+  });
+  L.marker([KGRR.lat,KGRR.lon], { icon:L.divIcon({className:'',html:'<span class="kgrr-text">KGRR</span>',iconSize:[40,14],iconAnchor:[20,7]}), zIndexOffset:860, interactive:false }).addTo(map);
+  L.marker([HOME.lat,HOME.lon], {
+    icon:L.divIcon({className:'',html:`<div class="home-marker"><svg width="24" height="24" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2"/><path d="M16 8L9 14v9h4v-5h6v5h4v-9L16 8z" fill="#3b82f6"/></svg></div>`,iconSize:[24,24],iconAnchor:[12,12]}), zIndexOffset:1000
+  }).addTo(map);
+}
+
+function updateMap(flights, featuredIcao) {
+  if (!map) return;
+  Object.values(planeMarkers).forEach(m => map.removeLayer(m));
+  planeMarkers = {};
+  trailLines.forEach(l => map.removeLayer(l));
+  trailLines = [];
+
+  const activeIcaos = new Set(flights.map(f => f.icao));
+  flights.forEach(f => {
+    if (!trailPositions[f.icao]) trailPositions[f.icao] = [];
+    const tr = trailPositions[f.icao], last = tr[tr.length-1];
+    if (!last || last[0] !== f.lat || last[1] !== f.lon) { tr.push([f.lat,f.lon,f.altitudeFt||0]); if (tr.length>120) tr.shift(); }
+  });
+  for (const k of Object.keys(trailPositions)) { if (!activeIcaos.has(k)) delete trailPositions[k]; }
+
+  const bounds = L.latLngBounds([HOME.lat,HOME.lon],[KGRR.lat,KGRR.lon]);
+  let featured = null;
+
+  flights.forEach(f => {
+    if (f.icao === featuredIcao) { featured = f; return; }
+    const color = f.status==='ARRIVING'?'#3b82f6':f.status==='DEPARTING'?'#10b981':'#64748b';
+    const cat = getPlaneCategory(f.typeCode), sz = PLANE_SZ[cat]||20;
+    const label = f.flightNumber || f.callsign || '';
+    const m = L.marker([f.lat,f.lon], {
+      icon:L.divIcon({className:'',html:`<div style="display:flex;flex-direction:column;align-items:center"><div class="plane-marker" style="transform:rotate(${f.heading||0}deg)">${makeIcon(color,sz,f.typeCode)}</div>${label?'<div style="margin-top:1px;padding:0 3px;border-radius:2px;background:rgba(15,22,40,0.85);color:#94a3b8;font-weight:600;font-size:8px;white-space:nowrap">'+label+'</div>':''}</div>`,iconSize:[sz+10,sz+16],iconAnchor:[(sz+10)/2,sz/2]}), zIndexOffset:800
+    }).addTo(map);
+    planeMarkers[f.icao] = m;
+  });
+
+  if (featuredIcao && trailPositions[featuredIcao] && trailPositions[featuredIcao].length > 1) {
+    const pts = trailPositions[featuredIcao];
+    for (let i=1; i<pts.length; i++) {
+      const seg = L.polyline([[pts[i-1][0],pts[i-1][1]],[pts[i][0],pts[i][1]]], { color:altColor(pts[i][2]), weight:3, opacity:0.7 }).addTo(map);
+      trailLines.push(seg);
+    }
+  }
+
+  if (featured) {
+    const lbl = featured.flightNumber || featured.callsign || featured.icao;
+    const cat = getPlaneCategory(featured.typeCode), sz = CLOSE_SZ[cat]||28;
+    const m = L.marker([featured.lat,featured.lon], {
+      icon:L.divIcon({className:'',html:`<div class="closest-marker-wrap"><div class="closest-plane" style="transform:rotate(${featured.heading||0}deg)">${makeIcon('#f59e0b',sz,featured.typeCode)}</div><div class="closest-label-tag">${lbl}</div></div>`,iconSize:[sz+8,sz+20],iconAnchor:[(sz+8)/2,sz/2]}), zIndexOffset:2000
+    }).addTo(map);
+    planeMarkers[featured.icao] = m;
+    bounds.extend([featured.lat,featured.lon]);
+  }
+
+  map.fitBounds(bounds.pad(0.05), { animate:true, duration:0.8, maxZoom:16 });
+}
+
+function renderOverlay(c, wx, total, kgrr) {
+  const ov = document.getElementById('infoOverlay');
+  if (!c) { ov.style.display = 'none'; return; }
+  ov.style.display = '';
+  const stCls = c.status==='ARRIVING'?'st-arriving':c.status==='DEPARTING'?'st-departing':c.status==='TRANSITING'?'st-transiting':'st-area';
+  const stTxt = c.status==='KGRR AREA'?'KGRR Area':c.status.charAt(0)+c.status.slice(1).toLowerCase();
+
+  let sub = [];
+  if (c.airline) sub.push(c.airline);
+  if (c.aircraftType) sub.push('<b>'+c.aircraftType+'</b>');
+  if (c.registration) sub.push(c.registration);
+
+  // Photo
+  let photoHtml = '';
+  if (c.photo && c.photo.url) {
+    photoHtml = `<div class="info-photo"><img src="${c.photo.url}" alt=""></div>`;
+  } else {
+    photoHtml = `<div class="info-photo"><div class="info-photo-empty">${c.aircraftType||'No photo'}</div></div>`;
+  }
+
+  // Route
+  let routeHtml = '';
+  if (c.status === 'ARRIVING') routeHtml = '<div class="info-route">\u2708 Arriving at <b>KGRR</b></div>';
+  else if (c.status === 'DEPARTING') routeHtml = '<div class="info-route">\u2708 Departing <b>KGRR</b></div>';
+  else if (c.status === 'KGRR AREA') routeHtml = '<div class="info-route">\u2708 In <b>KGRR</b> area</div>';
+  else routeHtml = '<div class="info-route">\u2708 Transiting area</div>';
+
+  // Vertical speed
+  const vrArrow = (c.verticalRate||0) < -100 ? '\u2193' : (c.verticalRate||0) > 100 ? '\u2191' : '\u2194';
+  const vrColor = (c.verticalRate||0) < -100 ? '#3b82f6' : (c.verticalRate||0) > 100 ? '#10b981' : '#64748b';
+
+  let wxHtml = '';
+  if (wx) {
+    const cls = {VFR:'wx-vfr',MVFR:'wx-mvfr',IFR:'wx-ifr',LIFR:'wx-lifr'}[wx.flightRules]||'wx-vfr';
+    const cloudStr = wx.clouds && wx.clouds.length > 0
+      ? wx.clouds.map(cl => cl.cover + (cl.baseFt ? ' ' + cl.baseFt.toLocaleString() + "'" : '')).join(', ')
+      : 'Clear';
+    const windStr = wx.windDir != null ? wx.windDir + '\u00B0 ' + wx.windSpd + 'kt' + (wx.windGust ? ' G' + wx.windGust : '') : '--';
+    const precipStr = wx.wxString ? ` &middot; <span style="color:#f59e0b;font-weight:700">${wx.wxString}</span>` : '';
+    wxHtml = `<div class="info-wx">
+      <span class="wx-badge ${cls}">${wx.flightRules||'--'}</span>
+      <span class="wx-text">${wx.tempF!=null?wx.tempF+'\u00B0F':''} &middot; Wind ${windStr} &middot; Vis ${wx.visMi!=null?wx.visMi+'mi':'--'} &middot; ${cloudStr} &middot; Altim ${wx.altimeter||'--'}"${precipStr}</span>
+    </div>`;
+  }
+
+  ov.innerHTML = `
+    <div class="info-main">
+      <div class="info-content">
+        <div class="info-top">
+          <span class="info-flight">${c.flightNumber||c.callsign||'Unknown'}</span>
+          <span class="info-status ${stCls}">${stTxt}</span>
+        </div>
+        <div class="info-sub">${sub.join(' &middot; ')||''}</div>
+        ${routeHtml}
+        <div class="info-stats">
+          <div class="info-stat"><div class="info-stat-val">${c.distHomeMi!=null?c.distHomeMi.toFixed(1):'-'} <span>mi</span></div><div class="info-stat-lbl">Distance</div></div>
+          <div class="info-stat"><div class="info-stat-val">${c.altitudeFt!=null?c.altitudeFt.toLocaleString():'-'} <span>ft</span></div><div class="info-stat-lbl">Altitude</div></div>
+          <div class="info-stat"><div class="info-stat-val">${c.speedMph!=null?c.speedMph.toLocaleString():'-'} <span>mph</span></div><div class="info-stat-lbl">Speed</div></div>
+          <div class="info-stat"><div class="info-stat-val" style="color:${vrColor}">${vrArrow} ${Math.abs(c.verticalRate||0).toLocaleString()} <span>fpm</span></div><div class="info-stat-lbl">Vert Speed</div></div>
+          <div class="info-stat"><div class="info-stat-val">${c.compassFromHome||'-'}</div><div class="info-stat-lbl">${c.bearingFromHome||'-'}\u00B0 from home</div></div>
+        </div>
+      </div>
+      ${photoHtml}
+    </div>
+    ${wxHtml}
+    <div class="info-count">${total||'-'} aircraft &middot; ${kgrr||0} KGRR${cycleList.length>1?' &middot; '+((cycleIndex%cycleList.length)+1)+'/'+cycleList.length:''}</div>`;
+}
+
+function renderData(d) {
+  const pf = d.priorityFlights || [];
+  if (pf.length > 0) {
+    const newIds = pf.map(f=>f.icao).sort().join(',');
+    const oldIds = cycleList.map(f=>f.icao).sort().join(',');
+    if (newIds !== oldIds) { cycleList = pf; cycleIndex = 0; lastCycleTime = Date.now(); }
+    else cycleList = pf;
+  } else if (d.closest) {
+    cycleList = [d.closest]; cycleIndex = 0;
+  } else {
+    cycleList = [];
+  }
+
+  const empty = document.getElementById('emptyMsg');
+  if (cycleList.length === 0) {
+    empty.classList.remove('hidden');
+    renderOverlay(null);
+    updateMap([], null);
+    return;
+  }
+  empty.classList.add('hidden');
+  if (cycleIndex >= cycleList.length) cycleIndex = 0;
+  const c = cycleList[cycleIndex];
+  renderOverlay(c, d.weather, d.totalInArea, d.kgrrCount);
+  updateMap(d.flights || [], c.icao);
+}
+
+async function fetchData() {
+  try {
+    const r = await fetch('/api/flights');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.lastUpdate !== lastServerUpdate) {
+      lastServerUpdate = d.lastUpdate;
+      lastData = d;
+      renderData(d);
+    }
+  } catch(e) { console.error(e); }
+}
+
+function cycleTick() {
+  if (cycleList.length <= 1 || !lastData) return;
+  if (Date.now() - lastCycleTime >= CYCLE_INTERVAL) {
+    cycleIndex = (cycleIndex + 1) % cycleList.length;
+    lastCycleTime = Date.now();
+    renderData(lastData);
+  }
+}
+
+initMap();
+fetchData();
+setInterval(fetchData, 3000);
+setInterval(cycleTick, 1000);
+</script>
+</body>
+</html>
