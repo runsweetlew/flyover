@@ -400,12 +400,9 @@
     <div class="wx-detail"><div class="wx-detail-label">Altimeter</div><div class="wx-detail-value" id="wxAltim">--</div></div>
     <div class="wx-detail" id="wxPrecipWrap" style="display:none"><div class="wx-detail-label">Precip</div><div class="wx-detail-value wx-precip" id="wxPrecip"></div></div>
   </div>
-  <div class="wx-atc">
+  <div class="wx-atc" id="atcSection">
     <span class="atc-label">LiveATC</span>
-    <button class="atc-btn" id="btnClr" onclick="toggleATC('clearance')"><span id="iconClr">&#9654;</span> Clr</button>
-    <button class="atc-btn" id="btnGnd" onclick="toggleATC('ground')"><span id="iconGnd">&#9654;</span> Gnd</button>
-    <button class="atc-btn" id="btnTower" onclick="toggleATC('tower')"><span id="iconTwr">&#9654;</span> Twr</button>
-    <button class="atc-btn" id="btnApp" onclick="toggleATC('approach')"><span id="iconApp">&#9654;</span> App</button>
+    <span id="atcButtons"></span>
     <button class="atc-btn" id="btnMute" onclick="toggleMute()" style="display:none"><span id="iconMute">&#128264;</span></button>
   </div>
   <audio id="atcAudio" preload="none"></audio>
@@ -464,6 +461,7 @@ const RUNWAYS = [
 
 // ── State ──
 let lastFetchTime = null, fetchFailed = false, currentATC = null;
+let atcConfig = null; // fetched from /api/atc-config at startup
 let map = null, planeMarkers = {}, homeMarker = null;
 let runwayPolygons = [], runwayLabels = [];
 let trailLines = [];
@@ -864,28 +862,27 @@ function renderWeather(wx) {
 
 // ── LiveATC (in-page audio) ──
 let atcMuted = true; // muted by default
-const atcBtns = {
-  clearance: { btn:'btnClr', icon:'iconClr' },
-  ground:    { btn:'btnGnd', icon:'iconGnd' },
-  tower:     { btn:'btnTower', icon:'iconTwr' },
-  approach:  { btn:'btnApp', icon:'iconApp' }
-};
-function toggleATC(stream) {
+function stopATC() {
+  const audio = document.getElementById('atcAudio');
+  currentATC = null; audio.pause(); audio.src = '';
+  document.querySelectorAll('#atcButtons .atc-btn').forEach(b => {
+    b.classList.remove('active');
+    b.querySelector('span').innerHTML = '&#9654;';
+  });
+  document.getElementById('btnMute').style.display = 'none';
+}
+function toggleATC(streamId) {
   const audio = document.getElementById('atcAudio');
   const bM = document.getElementById('btnMute');
-  if (currentATC === stream) {
-    currentATC = null; audio.pause(); audio.src = '';
-    Object.values(atcBtns).forEach(b => { document.getElementById(b.btn).classList.remove('active'); document.getElementById(b.icon).innerHTML = '&#9654;'; });
-    bM.style.display = 'none';
-    return;
-  }
-  currentATC = stream;
-  audio.src = '/api/atc/' + stream;
+  if (currentATC === streamId) { stopATC(); return; }
+  currentATC = streamId;
+  audio.src = '/api/atc/' + activeAirport.icao + '/' + streamId;
   audio.muted = atcMuted;
   audio.play().catch(() => {});
-  Object.entries(atcBtns).forEach(([k,b]) => {
-    document.getElementById(b.btn).classList.toggle('active', k === stream);
-    document.getElementById(b.icon).innerHTML = k === stream ? '&#9632;' : '&#9654;';
+  document.querySelectorAll('#atcButtons .atc-btn').forEach(b => {
+    const isActive = b.dataset.stream === streamId;
+    b.classList.toggle('active', isActive);
+    b.querySelector('span').innerHTML = isActive ? '&#9632;' : '&#9654;';
   });
   bM.style.display = 'flex';
   updateMuteBtn();
@@ -1135,16 +1132,22 @@ function hideLocationInput() {
 function updateAirportHeader() {
   document.getElementById('airportCode').textContent = activeAirport.icao;
   document.getElementById('airportName').textContent = activeAirport.name;
-  // Show/hide LiveATC (only available for KGRR)
-  const atcEl = document.querySelector('.wx-atc');
-  if (atcEl) atcEl.style.display = activeAirport.icao === 'KGRR' ? '' : 'none';
-  // Stop ATC if switching away from KGRR
-  if (activeAirport.icao !== 'KGRR' && currentATC) {
-    const audio = document.getElementById('atcAudio');
-    currentATC = null; audio.pause(); audio.src = '';
-    Object.values(atcBtns).forEach(b => { document.getElementById(b.btn).classList.remove('active'); document.getElementById(b.icon).innerHTML = '&#9654;'; });
-    document.getElementById('btnMute').style.display = 'none';
+  // Stop any playing ATC stream when switching airports
+  if (currentATC) stopATC();
+  // Dynamically generate ATC buttons from config
+  const atcSection = document.getElementById('atcSection');
+  const btnContainer = document.getElementById('atcButtons');
+  const streams = atcConfig ? atcConfig[activeAirport.icao] : null;
+  if (!streams || streams.length === 0) {
+    atcSection.style.display = 'none';
+    btnContainer.innerHTML = '';
+    return;
   }
+  atcSection.style.display = '';
+  btnContainer.innerHTML = streams.map(s =>
+    '<button class="atc-btn" data-stream="' + s.id + '" onclick="toggleATC(\'' + s.id + '\')">' +
+    '<span>&#9654;</span> ' + s.label + '</button>'
+  ).join('');
 }
 
 async function fetchCustomWeather() {
@@ -1372,6 +1375,10 @@ function cycleTick() {
 }
 
 // ── Init ──
+fetch('/api/atc-config').then(r => r.json()).then(cfg => {
+  atcConfig = cfg;
+  updateAirportHeader();
+}).catch(() => { atcConfig = {}; });
 loadCustomHome();
 initMap();
 fetchFlights();

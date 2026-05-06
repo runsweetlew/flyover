@@ -18,6 +18,27 @@ const KGRR_MAX_ALT_FT = 18000;
 const TRACKED_REGS = ['N61994', 'N759BJ', 'N133MC', 'N7222Q'];
 
 // ============================================
+// LiveATC Stream Configuration
+// ============================================
+const ATC_STREAMS = {
+  KGRR: [
+    { id: 'clearance', label: 'Clr', mount: 'kgrr2_2_del' },
+    { id: 'ground',    label: 'Gnd', mount: 'kgrr2_2_gnd' },
+    { id: 'tower',     label: 'Twr', mount: 'kgrr2_2_twr' },
+    { id: 'approach',  label: 'App', mount: 'kgrr2_2_app' },
+  ],
+  KDTW: [
+    { id: 'ground',    label: 'Gnd', mount: 'kdtw_gnd' },
+    { id: 'tower',     label: 'Twr', mount: 'kdtw_twr' },
+    { id: 'approach',  label: 'App', mount: 'kdtw_app' },
+    { id: 'departure', label: 'Dep', mount: 'kdtw_dep' },
+  ],
+  KLAN: [{ id: 'combined', label: 'All', mount: 'klan' }],
+  KTVC: [{ id: 'combined', label: 'All', mount: 'ktvc' }],
+  KJXN: [{ id: 'combined', label: 'All', mount: 'kjxn' }],
+};
+
+// ============================================
 // State & Caches
 // ============================================
 let flightData = {
@@ -909,12 +930,21 @@ http.createServer((req, res) => {
         res.end(JSON.stringify(null));
       });
     }
+  } else if (req.url === '/api/atc-config') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' });
+    res.end(JSON.stringify(ATC_STREAMS));
   } else if (req.url.startsWith('/api/atc/')) {
-    const stream = req.url.split('/api/atc/')[1];
-    const mounts = { clearance:'kgrr2_2_del', ground:'kgrr2_2_gnd', tower:'kgrr2_2_twr', approach:'kgrr2_2_app' };
-    const mount = mounts[stream];
-    if (!mount) { res.writeHead(404); res.end('Unknown stream'); return; }
-    const streamUrl = `http://d.liveatc.net/${mount}`;
+    // Route format: /api/atc/KGRR/tower
+    const pathPart = req.url.split('/api/atc/')[1];
+    const slashIdx = pathPart.indexOf('/');
+    if (slashIdx === -1) { res.writeHead(404); res.end('Missing stream ID'); return; }
+    const icao = pathPart.substring(0, slashIdx).toUpperCase();
+    const streamId = pathPart.substring(slashIdx + 1);
+    const streams = ATC_STREAMS[icao];
+    if (!streams) { res.writeHead(404); res.end('No ATC streams for this airport'); return; }
+    const entry = streams.find(s => s.id === streamId);
+    if (!entry) { res.writeHead(404); res.end('Unknown stream'); return; }
+    const streamUrl = `http://d.liveatc.net/${entry.mount}`;
     function pipeStream(url) {
       const mod = url.startsWith('https') ? https : http;
       const streamReq = mod.get(url, { timeout: 10000 }, (streamRes) => {
