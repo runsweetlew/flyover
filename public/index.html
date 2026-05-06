@@ -1134,7 +1134,18 @@ function updateAirportHeader() {
   document.getElementById('airportName').textContent = activeAirport.name;
   // Stop any playing ATC stream when switching airports
   if (currentATC) stopATC();
-  // Dynamically generate ATC buttons from config
+  renderAtcButtons();
+  // If airport not in config yet, probe the server
+  if (atcConfig && !atcConfig[activeAirport.icao]) {
+    const icao = activeAirport.icao;
+    fetch('/api/atc-config?icao=' + icao).then(r => r.json()).then(cfg => {
+      Object.assign(atcConfig, cfg);
+      // Only re-render if still on the same airport
+      if (activeAirport.icao === icao) renderAtcButtons();
+    }).catch(() => {});
+  }
+}
+function renderAtcButtons() {
   const atcSection = document.getElementById('atcSection');
   const btnContainer = document.getElementById('atcButtons');
   const streams = atcConfig ? atcConfig[activeAirport.icao] : null;

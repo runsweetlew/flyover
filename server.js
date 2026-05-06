@@ -20,7 +20,8 @@ const TRACKED_REGS = ['N61994', 'N759BJ', 'N133MC', 'N7222Q'];
 // ============================================
 // LiveATC Stream Configuration
 // ============================================
-const ATC_STREAMS = {
+// Known-good overrides (verified mount names that don't follow common patterns)
+const ATC_KNOWN = {
   KGRR: [
     { id: 'clearance', label: 'Clr', mount: 'kgrr2_2_del' },
     { id: 'ground',    label: 'Gnd', mount: 'kgrr2_2_gnd' },
@@ -37,6 +38,80 @@ const ATC_STREAMS = {
   KTVC: [{ id: 'combined', label: 'All', mount: 'ktvc' }],
   KJXN: [{ id: 'combined', label: 'All', mount: 'kjxn' }],
 };
+
+// Dynamic cache: ICAO -> { streams: [...], ts: timestamp, probing: false }
+const atcCache = {};
+const ATC_CACHE_TTL = 3600000; // 1 hour
+
+// Probe a single LiveATC mount — resolves true if stream is available
+function probeMount(mount) {
+  return new Promise((resolve) => {
+    const url = `http://d.liveatc.net/${mount}`;
+    const req = http.get(url, { timeout: 5000 }, (res) => {
+      // If we get 200, the stream exists
+      const ok = res.statusCode === 200 || (res.statusCode >= 300 && res.statusCode < 400);
+      res.destroy();
+      resolve(ok);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+// Discover available streams for an airport by probing common mount patterns
+async function discoverStreams(icao) {
+  const code = icao.toLowerCase();
+  // Common LiveATC mount patterns to try (ordered by likelihood)
+  const candidates = [
+    { id: 'combined',  label: 'All', mount: code },
+    { id: 'tower',     label: 'Twr', mount: `${code}_twr` },
+    { id: 'ground',    label: 'Gnd', mount: `${code}_gnd` },
+    { id: 'approach',  label: 'App', mount: `${code}_app` },
+    { id: 'departure', label: 'Dep', mount: `${code}_dep` },
+    { id: 'clearance', label: 'Clr', mount: `${code}_del` },
+    // Numbered variants (some airports use these)
+    { id: 'combined2', label: 'All', mount: `${code}2` },
+    { id: 'tower2',    label: 'Twr', mount: `${code}2_twr` },
+    { id: 'ground2',   label: 'Gnd', mount: `${code}2_gnd` },
+    { id: 'approach2', label: 'App', mount: `${code}2_app` },
+  ];
+
+  // Probe all in parallel
+  const results = await Promise.all(candidates.map(async c => {
+    const ok = await probeMount(c.mount);
+    return ok ? c : null;
+  }));
+
+  const found = results.filter(Boolean);
+
+  // If we found both combined and individual streams, prefer individual
+  const hasIndividual = found.some(s => s.id === 'tower' || s.id === 'tower2');
+  if (hasIndividual) {
+    // Filter out combined streams to avoid redundancy
+    return found.filter(s => s.id !== 'combined' && s.id !== 'combined2');
+  }
+  // If only combined, just return that
+  if (found.some(s => s.id === 'combined' || s.id === 'combined2')) {
+    return [found.find(s => s.id === 'combined' || s.id === 'combined2')];
+  }
+  return found;
+}
+
+// Get streams for an airport (cached, with auto-probe)
+async function getAtcStreams(icao) {
+  const key = icao.toUpperCase();
+  // Known-good overrides always win
+  if (ATC_KNOWN[key]) return ATC_KNOWN[key];
+  // Check cache
+  const cached = atcCache[key];
+  if (cached && Date.now() - cached.ts < ATC_CACHE_TTL) return cached.streams;
+  // Probe
+  console.log(`[${ts()}] Probing LiveATC for ${key}...`);
+  const streams = await discoverStreams(key);
+  atcCache[key] = { streams, ts: Date.now() };
+  console.log(`[${ts()}] LiveATC ${key}: found ${streams.length} stream(s)${streams.length ? ': ' + streams.map(s => s.mount).join(', ') : ''}`);
+  return streams;
+}
 
 // ============================================
 // State & Caches
@@ -930,9 +1005,23 @@ http.createServer((req, res) => {
         res.end(JSON.stringify(null));
       });
     }
-  } else if (req.url === '/api/atc-config') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' });
-    res.end(JSON.stringify(ATC_STREAMS));
+  } else if (req.url.startsWith('/api/atc-config')) {
+    // /api/atc-config?icao=KXYZ — probe and return streams for a specific airport
+    // /api/atc-config — return all known streams (for backward compat)
+    const params = new URL(req.url, 'http://localhost').searchParams;
+    const icao = (params.get('icao') || '').toUpperCase();
+    if (icao && /^[A-Z]{3,4}$/.test(icao)) {
+      getAtcStreams(icao).then(streams => {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ [icao]: streams }));
+      }).catch(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ [icao]: [] }));
+      });
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' });
+      res.end(JSON.stringify(ATC_KNOWN));
+    }
   } else if (req.url.startsWith('/api/atc/')) {
     // Route format: /api/atc/KGRR/tower
     const pathPart = req.url.split('/api/atc/')[1];
@@ -940,36 +1029,36 @@ http.createServer((req, res) => {
     if (slashIdx === -1) { res.writeHead(404); res.end('Missing stream ID'); return; }
     const icao = pathPart.substring(0, slashIdx).toUpperCase();
     const streamId = pathPart.substring(slashIdx + 1);
-    const streams = ATC_STREAMS[icao];
-    if (!streams) { res.writeHead(404); res.end('No ATC streams for this airport'); return; }
-    const entry = streams.find(s => s.id === streamId);
-    if (!entry) { res.writeHead(404); res.end('Unknown stream'); return; }
-    const streamUrl = `http://d.liveatc.net/${entry.mount}`;
-    function pipeStream(url) {
-      const mod = url.startsWith('https') ? https : http;
-      const streamReq = mod.get(url, { timeout: 10000 }, (streamRes) => {
-        if (streamRes.statusCode >= 300 && streamRes.statusCode < 400 && streamRes.headers.location) {
-          streamRes.resume();
-          pipeStream(streamRes.headers.location);
-          return;
-        }
-        if (streamRes.statusCode !== 200) {
-          res.writeHead(502); res.end('Stream unavailable');
-          streamRes.resume();
-          return;
-        }
-        res.writeHead(200, {
-          'Content-Type': 'audio/mpeg',
-          'Cache-Control': 'no-store',
-          'Transfer-Encoding': 'chunked'
+    getAtcStreams(icao).then(streams => {
+      const entry = streams.find(s => s.id === streamId);
+      if (!entry) { res.writeHead(404); res.end('Unknown stream'); return; }
+      const streamUrl = `http://d.liveatc.net/${entry.mount}`;
+      function pipeStream(url) {
+        const mod = url.startsWith('https') ? https : http;
+        const streamReq = mod.get(url, { timeout: 10000 }, (streamRes) => {
+          if (streamRes.statusCode >= 300 && streamRes.statusCode < 400 && streamRes.headers.location) {
+            streamRes.resume();
+            pipeStream(streamRes.headers.location);
+            return;
+          }
+          if (streamRes.statusCode !== 200) {
+            res.writeHead(502); res.end('Stream unavailable');
+            streamRes.resume();
+            return;
+          }
+          res.writeHead(200, {
+            'Content-Type': 'audio/mpeg',
+            'Cache-Control': 'no-store',
+            'Transfer-Encoding': 'chunked'
+          });
+          streamRes.pipe(res);
+          req.on('close', () => streamRes.destroy());
         });
-        streamRes.pipe(res);
-        req.on('close', () => streamRes.destroy());
-      });
-      streamReq.on('error', () => { if (!res.headersSent) { res.writeHead(502); res.end('Stream error'); } });
-      streamReq.on('timeout', () => { streamReq.destroy(); if (!res.headersSent) { res.writeHead(504); res.end('Stream timeout'); } });
-    }
-    pipeStream(streamUrl);
+        streamReq.on('error', () => { if (!res.headersSent) { res.writeHead(502); res.end('Stream error'); } });
+        streamReq.on('timeout', () => { streamReq.destroy(); if (!res.headersSent) { res.writeHead(504); res.end('Stream timeout'); } });
+      }
+      pipeStream(streamUrl);
+    }).catch(() => { res.writeHead(404); res.end('No ATC streams'); });
   } else if (req.url === '/api/flyins') {
     // Serve fly-in event data (static, from 2026 Michigan Fly-ins spreadsheet)
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' });
