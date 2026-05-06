@@ -923,14 +923,20 @@ function compassDir(deg) {
   return dirs[Math.round(deg / 22.5) % 16];
 }
 
-// ── Find nearest airport to a location ──
+// ── Find nearest airport of decent size to a location ──
+// Major airports (commercial service) are preferred unless a smaller one is within 15 mi
+const MAJOR_AIRPORTS = ['KGRR','KDTW','KLAN','KFNT','KAZO','KTVC','KMBS','KPLN','KAPN','KESC','KSAW','KCIU','KCMX','KIMT','KMKG'];
 function findNearestAirport(lat, lon) {
-  let best = DEFAULT_AIRPORT, bestDist = Infinity;
+  let bestMajor = DEFAULT_AIRPORT, bestMajorDist = Infinity;
+  let bestAny = DEFAULT_AIRPORT, bestAnyDist = Infinity;
   AIRPORTS.forEach(a => {
     const d = distMi(lat, lon, a.lat, a.lon);
-    if (d < bestDist) { bestDist = d; best = a; }
+    if (d < bestAnyDist) { bestAnyDist = d; bestAny = a; }
+    if (MAJOR_AIRPORTS.includes(a.icao) && d < bestMajorDist) { bestMajorDist = d; bestMajor = a; }
   });
-  return best;
+  // Use the nearest small airport only if it's within 15 mi AND the nearest major is much farther
+  if (bestAnyDist < 15 && bestMajorDist > bestAnyDist * 2.5) return bestAny;
+  return bestMajor;
 }
 
 // ── Client-side flight classification relative to active airport ──
