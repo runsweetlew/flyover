@@ -10,17 +10,17 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --bg: #070b14; --card: #0d1525; --card-border: #1a2540;
-      --text: #e2e8f0; --dim: #64748b; --muted: #3e4c66;
+      --text: #e2e8f0; --dim: #94a3b8; --muted: #64748b;
       --arriving: #3b82f6; --arriving-bg: rgba(59,130,246,0.12);
       --departing: #10b981; --departing-bg: rgba(16,185,129,0.12);
-      --accent: #f59e0b; --bright: #f8fafc;
+      --accent: #f59e0b; --bright: #f8fafc; --teal: #14b8a6;
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
       background: var(--bg); color: var(--text);
       height: 100vh; overflow: hidden;
       display: grid;
-      grid-template-rows: auto 1fr auto;
+      grid-template-rows: auto auto 1fr auto;
     }
 
     /* ── Header ── */
@@ -59,6 +59,7 @@
     }
     .board-header.arr { color: #3b82f6; border-color: #3b82f6; }
     .board-header.dep { color: #10b981; border-color: #10b981; }
+    .board-header.trk { color: #800020; border-color: #800020; }
     .board-rows { flex: 1; overflow: hidden; }
     .board-row { padding: 0.6vh 0.8vw; border-bottom: 1px solid rgba(20,30,50,0.6); }
     .board-row:nth-child(even) { background: rgba(13,21,37,0.4); }
@@ -81,6 +82,7 @@
     /* ── Map ── */
     .map-panel { position: relative; border-right: 1px solid var(--card-border); }
     #map { width: 100%; height: 100%; background: #0a0e17; }
+    .map-tiles-bright { filter: brightness(2.2) contrast(1.15) saturate(1.5); }
     .leaflet-control-attribution, .leaflet-control-zoom { display: none !important; }
 
     /* ── Info panel ── */
@@ -106,6 +108,7 @@
     }
     .status-arriving { background: var(--arriving-bg); color: var(--arriving); border: 1px solid rgba(59,130,246,0.25); }
     .status-departing { background: var(--departing-bg); color: var(--departing); border: 1px solid rgba(16,185,129,0.25); }
+    .status-landed { background: rgba(16,185,129,0.1); color: #10b981; border: 1px solid rgba(16,185,129,0.25); }
     .status-area { background: rgba(139,92,246,0.1); color: #a78bfa; border: 1px solid rgba(139,92,246,0.25); }
     .status-transiting { background: rgba(100,116,139,0.1); color: #94a3b8; border: 1px solid rgba(100,116,139,0.25); }
 
@@ -167,6 +170,89 @@
     .atc-btn:hover { border-color: var(--arriving); color: var(--arriving); }
     .atc-btn.active { background: var(--arriving-bg); border-color: var(--arriving); color: var(--arriving); }
     .wx-counts { font-size: clamp(0.6rem,0.85vw,0.8rem); color: var(--muted); text-align: right; }
+
+    /* ── Mobile responsive ── */
+    @media (max-width: 768px) {
+      body { height: auto; min-height: 100vh; overflow-y: auto; grid-template-rows: auto auto 1fr auto; }
+      .header { padding: 6px 12px; }
+      .airport-name { display: none; }
+      .main {
+        grid-template-columns: 1fr;
+        grid-template-rows: 50vh auto auto;
+        overflow: visible; min-height: auto;
+      }
+      .map-panel { order: 1; min-height: 50vh; border-right: none; border-bottom: 1px solid var(--card-border); }
+      .info-panel { order: 2; padding: 10px 12px; gap: 6px; }
+      .board-sidebar {
+        order: 3; border-right: none; border-top: 1px solid var(--card-border);
+        max-height: none; flex-direction: column;
+      }
+      .board-section { flex: none; }
+      .board-rows { overflow: visible; }
+      .board-header { padding: 6px 12px; font-size: 0.85rem; }
+      .board-row { padding: 6px 12px; }
+      .br-flight { font-size: 0.95rem; }
+      .br-eta { font-size: 0.8rem; }
+      .br-type, .br-status { font-size: 0.75rem; }
+      .board-counts { padding: 6px 12px; }
+
+      .flight-number { font-size: 1.6rem; }
+      .flight-subtitle { font-size: 0.9rem; }
+      .flight-route { font-size: 0.8rem; }
+      .status-badge { font-size: 0.7rem; }
+      .stats-row { grid-template-columns: repeat(2,1fr); gap: 8px; }
+      .stat-val { font-size: 1.2rem; }
+      .stat-lbl { font-size: 0.65rem; }
+      .photo-wrap { max-height: 200px; }
+      .facts-row { grid-template-columns: repeat(2,1fr); gap: 6px 12px; font-size: 0.9rem; padding: 8px 0; }
+      .fact-l { font-size: 0.65rem; }
+
+      .weather-bar {
+        grid-template-columns: auto 1fr;
+        gap: 8px 12px; padding: 8px 12px;
+        flex-wrap: wrap;
+      }
+      .wx-temp { font-size: 1.4rem; }
+      .wx-rules-badge { font-size: 1rem; }
+      .wx-details { flex-wrap: wrap; gap: 8px 16px; }
+      .wx-detail-value { font-size: 0.9rem; }
+      .wx-atc { display: flex; flex-wrap: wrap; gap: 0.4rem; grid-column: 1 / -1; }
+      .atc-btn { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+      .atc-label { font-size: 0.6rem; }
+      .wx-counts { grid-column: 1 / -1; text-align: left; }
+    }
+
+    /* ── Location bar ── */
+    .location-bar {
+      padding: 0.3vh 2vw; display: flex; align-items: center; gap: 0.6rem;
+      border-bottom: 1px solid var(--card-border); background: rgba(13,21,37,0.6);
+      font-size: clamp(0.7rem,0.95vw,0.85rem); min-height: 2rem;
+    }
+    .loc-icon { font-size: 1rem; flex-shrink: 0; }
+    .loc-current { color: var(--dim); cursor: pointer; }
+    .loc-current:hover { color: var(--teal); }
+    .loc-address { color: var(--text); font-weight: 600; }
+    .loc-action { color: var(--teal); cursor: pointer; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-left: 0.3rem; }
+    .loc-action:hover { text-decoration: underline; }
+    .loc-input-wrap { display: flex; align-items: center; gap: 0.4rem; flex: 1; max-width: 500px; }
+    .loc-input {
+      flex: 1; background: var(--card); border: 1px solid var(--card-border); color: var(--text);
+      padding: 0.3rem 0.6rem; border-radius: 0.3rem; font-family: inherit; font-size: inherit;
+      outline: none;
+    }
+    .loc-input:focus { border-color: var(--teal); }
+    .loc-btn {
+      background: var(--teal); color: #000; border: none; padding: 0.3rem 0.7rem;
+      border-radius: 0.3rem; cursor: pointer; font-weight: 700; font-size: inherit; font-family: inherit;
+    }
+    .loc-btn:hover { opacity: 0.85; }
+    .loc-btn-cancel { background: transparent; color: var(--dim); border: 1px solid var(--card-border); }
+    .loc-status { color: var(--dim); font-size: 0.85em; font-style: italic; }
+    .loc-error { color: #ef4444; font-size: 0.85em; }
+    @media (max-width: 768px) {
+      .location-bar { padding: 4px 12px; gap: 0.4rem; font-size: 0.75rem; }
+      .loc-input-wrap { max-width: none; }
+    }
 
     /* ── Empty overlay ── */
     .empty-overlay {
@@ -230,14 +316,38 @@
   <div class="header-left">
     <div class="live-dot" id="liveDot"></div>
     <div>
-      <div class="airport-code">KGRR</div>
-      <div class="airport-name">Gerald R. Ford International</div>
+      <div class="airport-code" id="airportCode">KGRR</div>
+      <div class="airport-name" id="airportName">Gerald R. Ford International</div>
     </div>
   </div>
-  <div class="header-right">
-    <div class="time" id="clock"></div>
-    <div id="updateTimer">Connecting...</div>
+  <div class="header-right" style="display:flex;align-items:center;gap:1rem;">
+    <a href="/flyins.html" style="color:#14b8a6;text-decoration:none;font-size:clamp(0.75rem,1.1vw,0.95rem);font-weight:700;padding:0.35rem 0.9rem;border-radius:0.4rem;border:1px solid rgba(20,184,166,0.4);background:rgba(20,184,166,0.12);white-space:nowrap;letter-spacing:0.03em;">&#9992; Fly-ins</a>
+    <div style="text-align:right">
+      <div class="time" id="clock"></div>
+      <div id="updateTimer">Connecting...</div>
+    </div>
   </div>
+</div>
+
+<div class="location-bar" id="locationBar">
+  <span class="loc-icon">&#128205;</span>
+  <span id="locDisplay">
+    <span class="loc-current" onclick="showLocationInput()">
+      <span class="loc-address" id="locAddr">Default (Grandville)</span>
+      <span class="loc-action" id="locChange">change</span>
+    </span>
+  </span>
+  <span id="locEdit" style="display:none">
+    <span class="loc-input-wrap">
+      <input class="loc-input" id="locInput" type="text" placeholder="Enter address or city..." onkeydown="if(event.key==='Enter')geocodeAndSet()" />
+      <button class="loc-btn" onclick="geocodeAndSet()">Go</button>
+      <button class="loc-btn loc-btn-cancel" onclick="hideLocationInput()">Cancel</button>
+    </span>
+  </span>
+  <span id="locReset" style="display:none">
+    <span class="loc-action" onclick="resetCustomHome()">reset to default</span>
+  </span>
+  <span id="locStatus" class="loc-status"></span>
 </div>
 
 <div class="main">
@@ -250,6 +360,10 @@
     <div class="board-section">
       <div class="board-header dep">Departures</div>
       <div class="board-rows" id="departureRows"><div class="board-empty">Scanning...</div></div>
+    </div>
+    <div class="board-section">
+      <div class="board-header trk">Tracked</div>
+      <div class="board-rows" id="trackedRows"><div class="board-empty">Scanning...</div></div>
     </div>
     <div class="board-counts">
       <span id="boardTotal">--</span>
@@ -300,8 +414,45 @@
 
 <script>
 // ── Config ──
-const HOME = { lat: 42.8703, lon: -85.4666 };
+const DEFAULT_HOME = { lat: 42.8703, lon: -85.4666 };
+let HOME = { lat: DEFAULT_HOME.lat, lon: DEFAULT_HOME.lon };
 const KGRR = { lat: 42.8808, lon: -85.5228 };
+
+// ── Michigan regional+ airports ──
+const AIRPORTS = [
+  { icao:'KGRR', name:'Gerald R. Ford International', lat:42.8808, lon:-85.5228, elev:794 },
+  { icao:'KDTW', name:'Detroit Metropolitan', lat:42.2124, lon:-83.3534, elev:645 },
+  { icao:'KLAN', name:'Capital Region International', lat:42.7787, lon:-84.5874, elev:861 },
+  { icao:'KFNT', name:'Bishop International', lat:42.9665, lon:-83.7436, elev:782 },
+  { icao:'KAZO', name:'Kalamazoo/Battle Creek Intl', lat:42.2350, lon:-85.5521, elev:874 },
+  { icao:'KTVC', name:'Cherry Capital', lat:44.7415, lon:-85.5822, elev:624 },
+  { icao:'KMBS', name:'MBS International', lat:43.5329, lon:-84.0796, elev:668 },
+  { icao:'KPLN', name:'Pellston Regional', lat:45.5709, lon:-84.7967, elev:721 },
+  { icao:'KAPN', name:'Alpena County Regional', lat:45.0781, lon:-83.5603, elev:689 },
+  { icao:'KESC', name:'Delta County', lat:45.7227, lon:-87.0937, elev:609 },
+  { icao:'KSAW', name:'Sawyer International', lat:46.3536, lon:-87.3954, elev:1221 },
+  { icao:'KCIU', name:'Chippewa County International', lat:46.2508, lon:-84.4724, elev:800 },
+  { icao:'KCMX', name:'Houghton County Memorial', lat:47.1684, lon:-88.4891, elev:1095 },
+  { icao:'KIMT', name:'Ford Airport', lat:45.8184, lon:-88.1146, elev:1182 },
+  { icao:'KMKG', name:'Muskegon County', lat:43.1695, lon:-86.2382, elev:629 },
+  { icao:'KJXN', name:'Jackson County', lat:42.2598, lon:-84.4594, elev:1001 },
+  { icao:'KBTL', name:'W.K. Kellogg', lat:42.3073, lon:-85.2515, elev:952 },
+  { icao:'KBEH', name:'Southwest Michigan Regional', lat:42.1286, lon:-86.4285, elev:643 },
+  { icao:'KMOP', name:'Mt Pleasant Municipal', lat:43.6217, lon:-84.7375, elev:754 },
+  { icao:'KHTL', name:'Roscommon County', lat:44.3598, lon:-84.6711, elev:1150 },
+  { icao:'KCAD', name:'Wexford County', lat:44.2753, lon:-85.4189, elev:1307 },
+  { icao:'KMBL', name:'Manistee County Blacker', lat:44.2722, lon:-86.2469, elev:621 },
+  { icao:'KLDM', name:'Mason County', lat:43.9625, lon:-86.4079, elev:646 },
+  { icao:'KGLR', name:'Gaylord Regional', lat:45.0135, lon:-84.7036, elev:1328 },
+  { icao:'KRQB', name:'Roben-Hood', lat:43.7225, lon:-85.5042, elev:990 },
+];
+const DEFAULT_AIRPORT = AIRPORTS[0]; // KGRR
+
+// ── Custom home state ──
+let customHome = null; // { lat, lon, label }
+let activeAirport = DEFAULT_AIRPORT;
+let clientPhotoCache = {};
+let customWeatherInterval = null;
 // ATC streams proxied through /api/atc/tower and /api/atc/approach
 
 // KGRR Runway thresholds (FAA data)
@@ -315,7 +466,6 @@ const RUNWAYS = [
 let lastFetchTime = null, fetchFailed = false, currentATC = null;
 let map = null, planeMarkers = {}, homeMarker = null;
 let runwayPolygons = [], runwayLabels = [];
-let trailPositions = {}; // icao -> [[lat,lon,altFt], ...]
 let trailLines = [];
 let lastClosestIcao = null;
 let lastServerUpdate = null, dataReceivedAt = null, flightSnapshots = {};
@@ -331,9 +481,9 @@ let lastData = null; // store last full API response for re-renders
 const fmtAlt = v => v != null ? v.toLocaleString() : '--';
 const fmtDist = v => v != null ? v.toFixed(1) : '--';
 const fmtSpd = v => v != null ? v.toLocaleString() : '--';
-const stClass = s => s==='ARRIVING'?'arriving':s==='DEPARTING'?'departing':s==='TRANSITING'?'transiting':'area';
-const stArrow = s => s==='ARRIVING'?'\u25BC':s==='DEPARTING'?'\u25B2':'\u25C6';
-const stLabel = s => s==='KGRR AREA'?'KGRR Area':s.charAt(0)+s.slice(1).toLowerCase();
+const stClass = s => s==='ARRIVING'?'arriving':s==='DEPARTING'?'departing':s==='LANDED'?'landed':s==='TRANSITING'?'transiting':'area';
+const stArrow = s => s==='ARRIVING'?'\u25BC':s==='DEPARTING'?'\u25B2':s==='LANDED'?'\u2713':'\u25C6';
+const stLabel = s => s==='KGRR AREA'?activeAirport.icao+' Area':s==='LANDED'?'Landed':s.charAt(0)+s.slice(1).toLowerCase();
 
 function altColor(alt) {
   if (alt == null) return '#64748b';
@@ -487,15 +637,20 @@ function computeRunwayCorners(lat1, lon1, lat2, lon2, widthFt) {
   ];
 }
 
+// ── Mobile detection ──
+const isMobile = window.matchMedia('(max-width: 768px)').matches;
+
 // ── Map Init ──
 function initMap() {
   map = L.map('map', {
-    zoomControl:false, attributionControl:false, dragging:false,
-    scrollWheelZoom:false, doubleClickZoom:false, touchZoom:false, keyboard:false
-  }).setView([(HOME.lat+KGRR.lat)/2, (HOME.lon+KGRR.lon)/2], 11);
+    zoomControl:false, attributionControl:false,
+    dragging:isMobile, scrollWheelZoom:false,
+    doubleClickZoom:isMobile, touchZoom:isMobile, keyboard:false
+  }).setView([(HOME.lat+activeAirport.lat)/2, (HOME.lon+activeAirport.lon)/2], 11);
 
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    subdomains:'abcd', maxZoom:19
+    subdomains:'abcd', maxZoom:19,
+    className:'map-tiles-bright'
   }).addTo(map);
 
   // Draw runway polygons at real coordinates
@@ -531,7 +686,7 @@ function initMap() {
 }
 
 // ── Update Map ──
-function updateMap(flights, closestIcao) {
+function updateMap(flights, closestIcao, alwaysShowIcao, centerOnFeatured) {
   if (!map) return;
 
   Object.values(planeMarkers).forEach(m => map.removeLayer(m));
@@ -539,31 +694,15 @@ function updateMap(flights, closestIcao) {
   trailLines.forEach(l => map.removeLayer(l));
   trailLines = [];
 
-  // Accumulate trail positions with altitude
-  const activeIcaos = new Set(flights.map(f => f.icao));
-  flights.forEach(f => {
-    if (!trailPositions[f.icao]) trailPositions[f.icao] = [];
-    const trail = trailPositions[f.icao];
-    const last = trail[trail.length - 1];
-    if (!last || last[0] !== f.lat || last[1] !== f.lon) {
-      trail.push([f.lat, f.lon, f.altitudeFt || 0]);
-      if (trail.length > 120) trail.shift();
-    }
-  });
-  for (const icao of Object.keys(trailPositions)) {
-    if (!activeIcaos.has(icao)) delete trailPositions[icao];
-  }
-  if (closestIcao !== lastClosestIcao) lastClosestIcao = closestIcao;
-
   // Bounds
-  const bounds = L.latLngBounds([HOME.lat, HOME.lon], [KGRR.lat, KGRR.lon]);
+  const bounds = L.latLngBounds([HOME.lat, HOME.lon], [activeAirport.lat, activeAirport.lon]);
   let closestFlight = null;
 
   // Regular planes (with labels, all included in bounds)
   flights.forEach(f => {
     if (f.icao === closestIcao) { closestFlight = f; return; }
     if (f.isTracked) return;
-    const color = f.status==='ARRIVING'?'#3b82f6':f.status==='DEPARTING'?'#10b981':'#64748b';
+    const color = f.status==='ARRIVING'?'#3b82f6':f.status==='DEPARTING'?'#10b981':f.status==='LANDED'?'#94a3b8':'#64748b';
     const cat = getPlaneCategory(f.typeCode);
     const sz = PLANE_SIZES[cat] || 24;
     const label = f.flightNumber || f.callsign || '';
@@ -591,12 +730,13 @@ function updateMap(flights, closestIcao) {
     bounds.extend([f.lat, f.lon]);
   });
 
-  // Altitude-colored trail for closest
-  if (closestIcao && trailPositions[closestIcao] && trailPositions[closestIcao].length > 1) {
-    const pts = trailPositions[closestIcao];
-    for (let i = 1; i < pts.length; i++) {
-      const seg = L.polyline([[pts[i-1][0],pts[i-1][1]], [pts[i][0],pts[i][1]]], {
-        color: altColor(pts[i][2]), weight: 3, opacity: 0.7, lineCap:'round', lineJoin:'round'
+  // Altitude-colored trail from server (full flight path)
+  const featuredFlight = cycleList.find(f => f.icao === closestIcao);
+  const trailPts = featuredFlight && featuredFlight.trail ? featuredFlight.trail : [];
+  if (trailPts.length > 1) {
+    for (let i = 1; i < trailPts.length; i++) {
+      const seg = L.polyline([[trailPts[i-1][0],trailPts[i-1][1]], [trailPts[i][0],trailPts[i][1]]], {
+        color: altColor(trailPts[i][2]), weight: 3, opacity: 0.7, lineCap:'round', lineJoin:'round'
       }).addTo(map);
       trailLines.push(seg);
     }
@@ -615,12 +755,20 @@ function updateMap(flights, closestIcao) {
     bounds.extend([closestFlight.lat, closestFlight.lon]);
   }
 
-  map.fitBounds(bounds.pad(0.05), { animate:true, duration:0.8, maxZoom:16 });
+  // Tracked plane: center on it; default: fit HOME/KGRR/closest only
+  if (centerOnFeatured && closestFlight) {
+    map.setView([closestFlight.lat, closestFlight.lon], 10, { animate:true, duration:0.8 });
+  } else {
+    const homeBounds = L.latLngBounds([HOME.lat, HOME.lon], [activeAirport.lat, activeAirport.lon]);
+    if (closestFlight) homeBounds.extend([closestFlight.lat, closestFlight.lon]);
+    map.fitBounds(homeBounds.pad(0.05), { animate:true, duration:0.8, maxZoom:16 });
+  }
 }
 
 // ── Airport Board ──
-function renderBoard(flights) {
+function renderBoard(flights, trackedStatus) {
   const arrivals = (flights||[]).filter(f => f.status==='ARRIVING').sort((a,b) => a.distKGRRMi - b.distKGRRMi).slice(0,5);
+  const landed = (flights||[]).filter(f => f.status==='LANDED').slice(0,3);
   const departures = (flights||[]).filter(f => f.status==='DEPARTING').sort((a,b) => a.distKGRRMi - b.distKGRRMi).slice(0,5);
 
   function arrStatus(f) {
@@ -629,6 +777,7 @@ function renderBoard(flights) {
     return { text:'INBOUND', color:'#e2e8f0' };
   }
   function depStatus(f) {
+    if (f.onGround) return { text:'AT GATE', color:'#94a3b8' };
     if (f.distKGRRMi < 5) return { text:'CLIMBING', color:'#10b981' };
     return { text:'DEPARTED', color:'#10b981' };
   }
@@ -638,23 +787,59 @@ function renderBoard(flights) {
     return min <= 0 ? '<1' : String(min);
   }
 
-  document.getElementById('arrivalRows').innerHTML = arrivals.length === 0
-    ? '<div class="board-empty">No arrivals detected</div>'
-    : arrivals.map((f,i) => {
+  // Combine arrivals + recently landed
+  const arrivalList = [...arrivals, ...landed].slice(0, 6);
+  document.getElementById('arrivalRows').innerHTML = arrivalList.length === 0
+    ? '<div class="board-empty">No arrivals</div>'
+    : arrivalList.map(f => {
+        if (f.status === 'LANDED') {
+          const rwy = f.runway ? `RWY ${f.runway}` : '';
+          const from = f.routeOrigin ? `from ${f.routeOrigin}` : '';
+          return `<div class="board-row">
+            <div class="br-top"><span class="br-flight">${f.flightNumber||f.callsign||'--'}</span><span class="br-eta" style="color:#10b981">\u2713 LANDED</span></div>
+            <div class="br-bottom"><span class="br-type">${from}</span><span class="br-status" style="color:#10b981">${rwy}</span></div>
+          </div>`;
+        }
         const st = arrStatus(f);
+        const from = f.routeOrigin ? `from ${f.routeOrigin}` : '';
         return `<div class="board-row">
           <div class="br-top"><span class="br-flight">${f.flightNumber||f.callsign||'--'}</span><span class="br-eta">${eta(f)} min</span></div>
-          <div class="br-bottom"><span class="br-type">${f.aircraftType||f.typeCode||''}</span><span class="br-status" style="color:${st.color}">${st.text}</span></div>
+          <div class="br-bottom"><span class="br-type">${from || f.aircraftType||f.typeCode||''}</span><span class="br-status" style="color:${st.color}">${st.text}</span></div>
         </div>`;
       }).join('');
 
   document.getElementById('departureRows').innerHTML = departures.length === 0
-    ? '<div class="board-empty">No departures detected</div>'
-    : departures.map((f,i) => {
+    ? '<div class="board-empty">No departures</div>'
+    : departures.map(f => {
         const st = depStatus(f);
+        const to = f.routeDest ? `to ${f.routeDest}` : '';
+        const rightCol = f.onGround ? (f.runway ? `RWY ${f.runway}` : '') : `${fmtAlt(f.altitudeFt)} ft`;
         return `<div class="board-row">
-          <div class="br-top"><span class="br-flight">${f.flightNumber||f.callsign||'--'}</span><span class="br-eta">${fmtAlt(f.altitudeFt)} ft</span></div>
-          <div class="br-bottom"><span class="br-type">${f.aircraftType||f.typeCode||''}</span><span class="br-status" style="color:${st.color}">${st.text}</span></div>
+          <div class="br-top"><span class="br-flight">${f.flightNumber||f.callsign||'--'}</span><span class="br-eta">${rightCol}</span></div>
+          <div class="br-bottom"><span class="br-type">${to || f.aircraftType||f.typeCode||''}</span><span class="br-status" style="color:${st.color}">${st.text}</span></div>
+        </div>`;
+      }).join('');
+
+  // Tracked planes section
+  const ts = trackedStatus || [];
+  document.getElementById('trackedRows').innerHTML = ts.length === 0
+    ? '<div class="board-empty">--</div>'
+    : ts.map(t => {
+        if (t.airborne && t.flight) {
+          const f = t.flight;
+          const route = f.routeDest === 'GRR' ? `from ${f.routeOrigin||'?'}` : f.routeOrigin === 'GRR' ? `to ${f.routeDest||'?'}` : (f.status||'');
+          return `<div class="board-row">
+            <div class="br-top"><span class="br-flight" style="color:#e2c0c8">${t.registration}</span><span class="br-eta" style="color:#10b981">\u2708 AIRBORNE</span></div>
+            <div class="br-bottom"><span class="br-type">${f.aircraftType||f.typeCode||''}</span><span class="br-status" style="color:#94a3b8">${route}</span></div>
+          </div>`;
+        }
+        const ls = t.lastSeen;
+        const lastAirport = ls && ls.airport ? ls.airport : '';
+        const agoStr = ls && ls.ago != null ? (ls.ago < 60 ? `${ls.ago}m ago` : `${Math.round(ls.ago/60)}h ago`) : '';
+        const lastRoute = ls && ls.routeOrigin && ls.routeDest ? `${ls.routeOrigin}\u2192${ls.routeDest}` : '';
+        return `<div class="board-row">
+          <div class="br-top"><span class="br-flight" style="color:#64748b">${t.registration}</span><span class="br-eta" style="color:#3e4c66">ON GROUND</span></div>
+          ${lastAirport ? `<div class="br-bottom"><span class="br-type">Last: ${lastAirport}${lastRoute ? ' ('+lastRoute+')' : ''}</span><span class="br-status" style="color:#3e4c66">${agoStr}</span></div>` : ''}
         </div>`;
       }).join('');
 }
@@ -717,6 +902,290 @@ function updateMuteBtn() {
   else { iM.innerHTML = '&#128266;'; bM.classList.add('active'); }
 }
 
+// ── Client-side distance/bearing math ──
+function distMi(lat1, lon1, lat2, lon2) {
+  const R = 3958.8; // Earth radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function bearDeg(lat1, lon1, lat2, lon2) {
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1*Math.PI/180) * Math.sin(lat2*Math.PI/180) - Math.sin(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function compassDir(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+// ── Find nearest airport to a location ──
+function findNearestAirport(lat, lon) {
+  let best = DEFAULT_AIRPORT, bestDist = Infinity;
+  AIRPORTS.forEach(a => {
+    const d = distMi(lat, lon, a.lat, a.lon);
+    if (d < bestDist) { bestDist = d; best = a; }
+  });
+  return best;
+}
+
+// ── Client-side flight classification relative to active airport ──
+function classifyFlightClient(f) {
+  const apt = activeAirport;
+  const dApt = distMi(apt.lat, apt.lon, f.lat, f.lon);
+  f.distAirportMi = Math.round(dApt * 10) / 10;
+  const alt = f.altitudeFt;
+  const vr = f.verticalRate || 0;
+
+  if (f.onGround && dApt < 3) {
+    f.status = f.routeOrigin === apt.icao.substring(1) ? 'DEPARTING' : 'LANDED';
+    f.isKGRR = true; return;
+  }
+  // Route-based (FR24 routes use 3-letter IATA-ish codes without K prefix)
+  const aptCode = apt.icao.substring(1); // KGRR -> GRR
+  if (f.routeDest === aptCode) { f.status = 'ARRIVING'; f.isKGRR = true; return; }
+  if (f.routeOrigin === aptCode) { f.status = 'DEPARTING'; f.isKGRR = true; return; }
+
+  // Heuristic classification
+  if (dApt > 35 || (alt !== null && alt > 18000)) { f.status = 'TRANSITING'; f.isKGRR = false; return; }
+  if (dApt < 8 && alt !== null && alt < 6000) { f.status = vr < -100 ? 'ARRIVING' : 'DEPARTING'; f.isKGRR = true; return; }
+  if (vr < -300) { f.status = 'ARRIVING'; f.isKGRR = true; return; }
+  if (vr > 300) { f.status = 'DEPARTING'; f.isKGRR = true; return; }
+  if (dApt < 20 && alt !== null && alt < 10000) { f.status = 'KGRR AREA'; f.isKGRR = true; return; }
+  if (dApt < 35 && alt !== null && alt < 15000 && vr < -100) { f.status = 'ARRIVING'; f.isKGRR = true; return; }
+  f.status = 'TRANSITING'; f.isKGRR = false;
+}
+
+// ── Custom home: recalculate distances and reclassify for all flights ──
+function recalcHomeDistances(data) {
+  if (!customHome) return;
+  const isCustomAirport = activeAirport.icao !== 'KGRR';
+
+  const recalcFlight = f => {
+    f.distHomeMi = distMi(HOME.lat, HOME.lon, f.lat, f.lon);
+    const b = bearDeg(HOME.lat, HOME.lon, f.lat, f.lon);
+    f.bearingFromHome = Math.round(b);
+    f.compassFromHome = compassDir(b);
+    if (isCustomAirport) {
+      f.distKGRRMi = distMi(activeAirport.lat, activeAirport.lon, f.lat, f.lon);
+      classifyFlightClient(f);
+    }
+  };
+  (data.flights || []).forEach(recalcFlight);
+  (data.priorityFlights || []).forEach(recalcFlight);
+  if (data.closest) recalcFlight(data.closest);
+
+  // Re-determine closest from all non-tracked flights
+  const candidates = (data.flights || []).filter(f => !f.isTracked && f.lat && f.lon);
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => a.distHomeMi - b.distHomeMi);
+    const newClosest = candidates[0];
+    // Copy photo from old closest if same icao, or from cache
+    if (data.closest && data.closest.icao === newClosest.icao) {
+      newClosest.photo = data.closest.photo;
+    } else if (clientPhotoCache[newClosest.icao]) {
+      newClosest.photo = clientPhotoCache[newClosest.icao];
+    }
+    // Copy trail from old closest if same icao
+    if (data.closest && data.closest.icao === newClosest.icao && data.closest.trail) {
+      newClosest.trail = data.closest.trail;
+    }
+    data.closest = newClosest;
+  }
+
+  // Rebuild priorityFlights: tracked planes + new closest
+  const tracked = (data.priorityFlights || []).filter(f => f.isTracked);
+  tracked.forEach(recalcFlight);
+  if (data.closest) {
+    data.priorityFlights = [...tracked, data.closest];
+  } else {
+    data.priorityFlights = tracked;
+  }
+
+  // Update airport-relative counts
+  if (isCustomAirport) {
+    data.kgrrCount = (data.flights || []).filter(f => f.isKGRR).length;
+  }
+}
+
+// ── Custom home: fetch photo for new closest ──
+async function fetchNewClosestPhoto() {
+  if (!customHome || !lastData || !lastData.closest) return;
+  const c = lastData.closest;
+  if (c.photo && c.photo.url) return; // already have one
+  if (clientPhotoCache[c.icao]) { c.photo = clientPhotoCache[c.icao]; return; }
+  try {
+    const url = `/api/photo/${c.icao}` + (c.registration ? `?reg=${encodeURIComponent(c.registration)}` : '');
+    const r = await fetch(url);
+    if (r.ok) {
+      const p = await r.json();
+      if (p && p.url) {
+        clientPhotoCache[c.icao] = p;
+        c.photo = p;
+        // Re-render current panel if still showing this flight
+        if (cycleList.length > 0 && cycleList[cycleIndex] && cycleList[cycleIndex].icao === c.icao) {
+          renderCurrentCycleFlight(lastData);
+        }
+      }
+    }
+  } catch(e) { /* ignore */ }
+}
+
+// ── Location UI functions ──
+function loadCustomHome() {
+  try {
+    const saved = localStorage.getItem('flyover_custom_home');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.lat && parsed.lon) {
+        customHome = parsed;
+        HOME.lat = parsed.lat;
+        HOME.lon = parsed.lon;
+        activeAirport = findNearestAirport(parsed.lat, parsed.lon);
+        updateLocationDisplay();
+        updateAirportHeader();
+        fetchCustomWeather();
+      }
+    }
+  } catch(e) { /* ignore */ }
+}
+
+function saveCustomHome(lat, lon, label) {
+  customHome = { lat, lon, label };
+  HOME.lat = lat;
+  HOME.lon = lon;
+  localStorage.setItem('flyover_custom_home', JSON.stringify(customHome));
+  // Find and switch to nearest airport
+  activeAirport = findNearestAirport(lat, lon);
+  updateLocationDisplay();
+  updateAirportHeader();
+  fetchCustomWeather();
+  // Move home marker
+  if (homeMarker) homeMarker.setLatLng([lat, lon]);
+  // Re-fetch to recalculate with new home
+  if (lastData) {
+    recalcHomeDistances(lastData);
+    renderInfo(lastData);
+    fetchNewClosestPhoto();
+  }
+}
+
+function resetCustomHome() {
+  customHome = null;
+  HOME.lat = DEFAULT_HOME.lat;
+  HOME.lon = DEFAULT_HOME.lon;
+  activeAirport = DEFAULT_AIRPORT;
+  localStorage.removeItem('flyover_custom_home');
+  clientPhotoCache = {};
+  if (customWeatherInterval) { clearInterval(customWeatherInterval); customWeatherInterval = null; }
+  updateLocationDisplay();
+  updateAirportHeader();
+  if (homeMarker) homeMarker.setLatLng([HOME.lat, HOME.lon]);
+  if (lastData) {
+    // Force a fresh fetch so server-calculated distances are used
+    lastServerUpdate = null;
+    fetchFlights();
+  }
+}
+
+function updateLocationDisplay() {
+  const addr = document.getElementById('locAddr');
+  const change = document.getElementById('locChange');
+  const reset = document.getElementById('locReset');
+  if (customHome) {
+    const locLabel = customHome.label || `${customHome.lat.toFixed(4)}, ${customHome.lon.toFixed(4)}`;
+    const aptDist = distMi(customHome.lat, customHome.lon, activeAirport.lat, activeAirport.lon).toFixed(0);
+    addr.textContent = `${locLabel} — nearest airport: ${activeAirport.icao} (${aptDist} mi)`;
+    change.textContent = 'change';
+    reset.style.display = '';
+  } else {
+    addr.textContent = 'Default (Grandville)';
+    change.textContent = 'change';
+    reset.style.display = 'none';
+  }
+}
+
+function showLocationInput() {
+  document.getElementById('locDisplay').style.display = 'none';
+  document.getElementById('locEdit').style.display = '';
+  document.getElementById('locReset').style.display = 'none';
+  const inp = document.getElementById('locInput');
+  inp.value = '';
+  inp.focus();
+  document.getElementById('locStatus').textContent = '';
+}
+
+function hideLocationInput() {
+  document.getElementById('locDisplay').style.display = '';
+  document.getElementById('locEdit').style.display = 'none';
+  if (customHome) document.getElementById('locReset').style.display = '';
+  document.getElementById('locStatus').textContent = '';
+}
+
+function updateAirportHeader() {
+  document.getElementById('airportCode').textContent = activeAirport.icao;
+  document.getElementById('airportName').textContent = activeAirport.name;
+  // Show/hide LiveATC (only available for KGRR)
+  const atcEl = document.querySelector('.wx-atc');
+  if (atcEl) atcEl.style.display = activeAirport.icao === 'KGRR' ? '' : 'none';
+  // Stop ATC if switching away from KGRR
+  if (activeAirport.icao !== 'KGRR' && currentATC) {
+    const audio = document.getElementById('atcAudio');
+    currentATC = null; audio.pause(); audio.src = '';
+    Object.values(atcBtns).forEach(b => { document.getElementById(b.btn).classList.remove('active'); document.getElementById(b.icon).innerHTML = '&#9654;'; });
+    document.getElementById('btnMute').style.display = 'none';
+  }
+}
+
+async function fetchCustomWeather() {
+  if (!customHome || activeAirport.icao === 'KGRR') return;
+  try {
+    const r = await fetch(`/api/weather/${activeAirport.icao}`);
+    if (r.ok) {
+      const wx = await r.json();
+      if (wx) renderWeather(wx);
+    }
+  } catch(e) { /* ignore */ }
+  // Refresh every 5 minutes
+  if (customWeatherInterval) clearInterval(customWeatherInterval);
+  customWeatherInterval = setInterval(async () => {
+    if (!customHome || activeAirport.icao === 'KGRR') return;
+    try {
+      const r = await fetch(`/api/weather/${activeAirport.icao}`);
+      if (r.ok) { const wx = await r.json(); if (wx) renderWeather(wx); }
+    } catch(e) {}
+  }, 300000);
+}
+
+async function geocodeAndSet() {
+  const inp = document.getElementById('locInput');
+  const status = document.getElementById('locStatus');
+  const q = inp.value.trim();
+  if (!q) { status.textContent = 'Enter an address'; status.className = 'loc-error'; return; }
+  status.textContent = 'Looking up...';
+  status.className = 'loc-status';
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&countrycodes=us`);
+    const results = await r.json();
+    if (!results || results.length === 0) {
+      status.textContent = 'Address not found — try again';
+      status.className = 'loc-error';
+      return;
+    }
+    const loc = results[0];
+    const label = loc.display_name.split(',').slice(0, 3).join(',').trim();
+    hideLocationInput();
+    saveCustomHome(parseFloat(loc.lat), parseFloat(loc.lon), label);
+  } catch(e) {
+    status.textContent = 'Geocoding error — try again';
+    status.className = 'loc-error';
+  }
+}
+
 // ── Render flight info for a given flight object ──
 function renderFlightPanel(c, label) {
   const panel = document.getElementById('infoPanel');
@@ -726,10 +1195,14 @@ function renderFlightPanel(c, label) {
   if (c.aircraftType) sub.push('<b>'+c.aircraftType+'</b>');
   if (c.registration) sub.push(c.registration);
 
+  const rwyStr = c.runway ? ` &middot; RWY ${c.runway}` : '';
   let routeHtml = '';
-  if (c.status === 'ARRIVING') routeHtml = '<div class="flight-route">\u2708 Arriving at <b>KGRR</b></div>';
-  else if (c.status === 'DEPARTING') routeHtml = '<div class="flight-route">\u2708 Departing <b>KGRR</b></div>';
-  else if (c.status === 'KGRR AREA') routeHtml = '<div class="flight-route">\u2708 In <b>KGRR</b> area</div>';
+  if (c.routeOrigin && c.routeDest) {
+    routeHtml = `<div class="flight-route">\u2708 <b>${c.routeOrigin}</b> \u2192 <b>${c.routeDest}</b>${rwyStr}</div>`;
+  } else if (c.status === 'LANDED') routeHtml = `<div class="flight-route">\u2713 Landed at <b>${activeAirport.icao}</b>${rwyStr}</div>`;
+  else if (c.status === 'ARRIVING') routeHtml = `<div class="flight-route">\u2708 Arriving at <b>${activeAirport.icao}</b></div>`;
+  else if (c.status === 'DEPARTING') routeHtml = `<div class="flight-route">\u2708 Departing <b>${activeAirport.icao}</b></div>`;
+  else if (c.status === 'KGRR AREA') routeHtml = `<div class="flight-route">\u2708 In <b>${activeAirport.icao}</b> area</div>`;
   else routeHtml = '<div class="flight-route">\u2708 Transiting area</div>';
 
   const photo = c.photo;
@@ -747,7 +1220,7 @@ function renderFlightPanel(c, label) {
   const vrC = c.verticalRate<-100?'var(--arriving)':c.verticalRate>100?'var(--departing)':'var(--dim)';
 
   const cycleInfo = cycleList.length > 1
-    ? `<div style="font-size:clamp(0.5rem,0.7vw,0.65rem);color:var(--muted);margin-top:0.15rem">${cycleIndex+1} of ${cycleList.length} \u2022 ${c.isTracked?'TRACKED':'KGRR'}</div>`
+    ? `<div style="font-size:clamp(0.5rem,0.7vw,0.65rem);color:var(--muted);margin-top:0.15rem">${cycleIndex+1} of ${cycleList.length} \u2022 ${c.isTracked?'TRACKED':activeAirport.icao}</div>`
     : '';
 
   panel.innerHTML = `
@@ -769,7 +1242,7 @@ function renderFlightPanel(c, label) {
     <div class="facts-row">
       <div class="fact"><span class="fact-l">Vert</span><span class="fact-v" style="color:${vrC}">${vrA} ${Math.abs(c.verticalRate).toLocaleString()} fpm</span></div>
       <div class="fact"><span class="fact-l">Track</span><span class="fact-v">${c.heading!=null?c.heading+'\u00B0':'--'}</span></div>
-      <div class="fact"><span class="fact-l">To KGRR</span><span class="fact-v">${fmtDist(c.distKGRRMi)} mi</span></div>
+      <div class="fact"><span class="fact-l">To ${activeAirport.icao}</span><span class="fact-v">${fmtDist(c.distKGRRMi)} mi</span></div>
       <div class="fact"><span class="fact-l">Reg</span><span class="fact-v">${c.registration||'--'}</span></div>
       <div class="fact"><span class="fact-l">Squawk</span><span class="fact-v">${c.squawk||'--'}</span></div>
       <div class="fact"><span class="fact-l">ICAO</span><span class="fact-v">${c.icao||'--'}</span></div>
@@ -781,14 +1254,16 @@ function renderInfo(data) {
   const panel = document.getElementById('infoPanel');
   const overlay = document.getElementById('emptyOverlay');
 
+  const aptLabel = activeAirport.icao;
   document.getElementById('wxCounts').innerHTML =
-    `${data.totalInArea||'--'} aircraft &middot; ${data.kgrrCount||0} KGRR` +
+    `${data.totalInArea||'--'} aircraft &middot; ${data.kgrrCount||0} ${aptLabel}` +
     (data.source ? ` &middot; ${data.source}` : '');
   document.getElementById('boardTotal').textContent = `${data.totalInArea||'--'} in area`;
-  document.getElementById('boardKgrr').textContent = `${data.kgrrCount||0} KGRR`;
+  document.getElementById('boardKgrr').textContent = `${data.kgrrCount||0} ${aptLabel}`;
 
-  renderWeather(data.weather);
-  renderBoard(data.flights);
+  // Only use server weather if showing KGRR (custom airport fetches its own)
+  if (activeAirport.icao === 'KGRR') renderWeather(data.weather);
+  renderBoard(data.flights, data.trackedStatus);
 
   // Update cycle list from server priority flights
   const pf = data.priorityFlights || [];
@@ -830,7 +1305,9 @@ function renderCurrentCycleFlight(data) {
   const c = cycleList[cycleIndex];
   const label = c.isTracked ? (c.registration || 'Tracked') : 'Closest Flight';
   renderFlightPanel(c, label);
-  updateMap(data ? (data.flights || []) : (lastData ? lastData.flights || [] : []), c.icao);
+  const d = data || lastData;
+  const closestHomeIcao = d && d.closest ? d.closest.icao : null;
+  updateMap(d ? (d.flights || []) : [], c.icao, closestHomeIcao, c.isTracked);
 }
 
 // ── Interpolation ──
@@ -869,8 +1346,10 @@ async function fetchFlights() {
       (d.priorityFlights || []).forEach(f => {
         flightSnapshots[f.icao] = { baseLat:f.lat, baseLon:f.lon, heading:f.heading, speedKts:f.speedKts };
       });
+      if (customHome) recalcHomeDistances(d);
       lastData = d;
       renderInfo(d);
+      if (customHome) fetchNewClosestPhoto();
     }
   } catch(e) { console.error(e); fetchFailed = true; }
 }
@@ -887,6 +1366,7 @@ function cycleTick() {
 }
 
 // ── Init ──
+loadCustomHome();
 initMap();
 fetchFlights();
 setInterval(fetchFlights, 3000);

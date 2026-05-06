@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flyover · Michigan Fly-ins 2026</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #070b14; --card: #0d1525; --card-border: #1a2540;
+      --text: #e2e8f0; --dim: #94a3b8; --muted: #64748b;
+      --arriving: #3b82f6; --departing: #10b981;
+      --accent: #f59e0b; --bright: #f8fafc;
+      --teal: #14b8a6; --purple: #a78bfa;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      height: 100vh; overflow: hidden;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+    }
+
+    /* Header */
+    .header {
+      padding: 0.8vh 2vw; display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .header-left { display: flex; align-items: center; gap: 0.8rem; }
+    .header-title { font-size: clamp(1.1rem,1.8vw,1.5rem); font-weight: 800; letter-spacing: 0.08em; color: var(--bright); }
+    .header-sub { font-size: clamp(0.55rem,0.8vw,0.7rem); color: var(--dim); }
+    .back-link {
+      color: var(--arriving); text-decoration: none; font-size: clamp(0.7rem,1vw,0.85rem);
+      font-weight: 600; display: flex; align-items: center; gap: 0.3rem;
+      padding: 0.3rem 0.8rem; border-radius: 0.4rem; border: 1px solid rgba(59,130,246,0.25);
+      background: rgba(59,130,246,0.08); transition: all 0.2s;
+    }
+    .back-link:hover { background: rgba(59,130,246,0.15); border-color: var(--arriving); }
+
+    /* Filters */
+    .filters {
+      padding: 0.6vh 2vw; display: flex; align-items: center; gap: 0.5rem;
+      border-bottom: 1px solid var(--card-border); flex-wrap: wrap;
+    }
+    .filter-pill {
+      padding: 0.3rem 0.8rem; border-radius: 2rem; border: 1px solid var(--card-border);
+      background: transparent; color: var(--dim); font-size: clamp(0.65rem,0.9vw,0.8rem);
+      font-weight: 600; cursor: pointer; transition: all 0.2s; font-family: inherit;
+      white-space: nowrap;
+    }
+    .filter-pill:hover { border-color: var(--teal); color: var(--teal); }
+    .filter-pill.active { background: rgba(20,184,166,0.15); border-color: var(--teal); color: var(--teal); }
+    .filter-pill.recurring.active { background: rgba(245,158,11,0.12); border-color: var(--accent); color: var(--accent); }
+    .filter-search {
+      margin-left: auto; padding: 0.3rem 0.8rem; border-radius: 0.4rem;
+      border: 1px solid var(--card-border); background: var(--card); color: var(--text);
+      font-size: clamp(0.65rem,0.9vw,0.8rem); font-family: inherit; width: clamp(120px,15vw,200px);
+      outline: none; transition: border-color 0.2s;
+    }
+    .filter-search:focus { border-color: var(--teal); }
+    .filter-search::placeholder { color: var(--muted); }
+    .event-count {
+      font-size: clamp(0.6rem,0.85vw,0.75rem); color: var(--muted); margin-left: 0.5rem;
+      white-space: nowrap;
+    }
+
+    /* Main layout */
+    .main { display: grid; grid-template-columns: 30fr 70fr; min-height: 0; overflow: hidden; }
+
+    /* Sidebar */
+    .sidebar {
+      background: #060a12; border-right: 1px solid var(--card-border);
+      overflow-y: auto; overflow-x: hidden;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-track { background: transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+
+    .date-group { border-bottom: 1px solid var(--card-border); }
+    .date-header {
+      position: sticky; top: 0; z-index: 10;
+      padding: 0.5vh 1vw; font-size: clamp(0.65rem,0.9vw,0.8rem);
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em;
+      background: var(--card); color: var(--dim); border-bottom: 1px solid var(--card-border);
+    }
+    .date-header.recurring { color: var(--accent); }
+    .date-header .day-name { color: var(--muted); font-weight: 400; margin-left: 0.4rem; }
+
+    .event-card {
+      padding: 0.6vh 1vw; border-bottom: 1px solid rgba(20,30,50,0.4);
+      cursor: pointer; transition: background 0.15s;
+    }
+    .event-card:hover { background: rgba(20,184,166,0.06); }
+    .event-card.active { background: rgba(20,184,166,0.1); border-left: 3px solid var(--teal); }
+    .ec-top { display: flex; align-items: baseline; gap: 0.4rem; }
+    .ec-code {
+      font-size: clamp(0.7rem,1vw,0.9rem); font-weight: 800; color: var(--teal);
+      font-family: 'SF Mono', 'Courier New', monospace; letter-spacing: 0.05em;
+    }
+    .ec-city { font-size: clamp(0.65rem,0.9vw,0.8rem); color: var(--dim); }
+    .ec-name { font-size: clamp(0.75rem,1.1vw,0.95rem); font-weight: 600; color: var(--bright); margin-top: 1px; }
+    .ec-time {
+      font-size: clamp(0.6rem,0.85vw,0.75rem); color: var(--muted);
+      font-family: 'SF Mono', 'Courier New', monospace; margin-top: 1px;
+    }
+    .ec-badge {
+      display: inline-block; padding: 0px 6px; border-radius: 3px;
+      font-size: clamp(0.5rem,0.7vw,0.6rem); font-weight: 700; letter-spacing: 0.05em;
+      text-transform: uppercase; margin-left: 0.3rem;
+    }
+    .ec-badge.upcoming { background: rgba(16,185,129,0.15); color: #10b981; }
+    .ec-badge.today { background: rgba(245,158,11,0.15); color: var(--accent); }
+    .ec-badge.multi { background: rgba(167,139,250,0.15); color: var(--purple); }
+    .ec-badge.recurring-badge { background: rgba(245,158,11,0.1); color: var(--accent); }
+
+    .no-events {
+      padding: 2rem 1rem; text-align: center; color: var(--muted);
+      font-size: 0.85rem; font-style: italic;
+    }
+
+    /* Map */
+    .map-panel { position: relative; }
+    #map { width: 100%; height: 100%; background: #0a0e17; }
+    .leaflet-control-attribution { display: none !important; }
+    .leaflet-control-zoom { display: none !important; }
+
+    /* Layer toggle */
+    .layer-toggle {
+      position: absolute; top: 10px; right: 10px; z-index: 1000;
+      display: flex; gap: 4px; background: rgba(7,11,20,0.85); padding: 4px;
+      border-radius: 6px; border: 1px solid var(--card-border);
+    }
+    .layer-btn {
+      padding: 4px 10px; border-radius: 4px; border: none;
+      background: transparent; color: var(--dim); font-size: 0.7rem;
+      font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s;
+    }
+    .layer-btn.active { background: rgba(20,184,166,0.2); color: var(--teal); }
+    .layer-btn:hover:not(.active) { color: var(--text); }
+
+    /* Map popup styling */
+    .leaflet-popup-content-wrapper {
+      background: var(--card) !important; color: var(--text) !important;
+      border: 1px solid var(--card-border) !important; border-radius: 8px !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+    }
+    .leaflet-popup-tip { background: var(--card) !important; border: 1px solid var(--card-border) !important; }
+    .leaflet-popup-close-button { color: var(--dim) !important; }
+    .leaflet-popup-close-button:hover { color: var(--text) !important; }
+
+    .popup-header { font-size: 1rem; font-weight: 800; color: var(--bright); margin-bottom: 2px; }
+    .popup-code { color: var(--teal); font-family: 'SF Mono', monospace; }
+    .popup-city { font-size: 0.8rem; color: var(--dim); }
+    .popup-elev { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .popup-divider { border: none; border-top: 1px solid var(--card-border); margin: 6px 0; }
+    .popup-event { padding: 3px 0; }
+    .popup-event-name { font-size: 0.8rem; font-weight: 600; color: var(--text); }
+    .popup-event-date { font-size: 0.72rem; color: var(--dim); }
+    .popup-event-time { font-size: 0.72rem; color: var(--muted); font-family: 'SF Mono', monospace; }
+    .popup-link {
+      display: inline-block; margin-top: 6px; font-size: 0.72rem;
+      color: var(--arriving); text-decoration: none; font-weight: 600;
+    }
+    .popup-link:hover { text-decoration: underline; }
+
+    /* Airport markers */
+    .airport-marker {
+      display: flex; flex-direction: column; align-items: center;
+    }
+    .airport-dot {
+      width: 12px; height: 12px; border-radius: 50%; border: 2px solid;
+      box-shadow: 0 0 6px rgba(0,0,0,0.4);
+    }
+    .airport-label {
+      margin-top: 1px; padding: 0px 4px; border-radius: 2px;
+      background: rgba(7,11,20,0.8); font-size: 10px; font-weight: 700;
+      letter-spacing: 0.05em; white-space: nowrap;
+      font-family: 'SF Mono', 'Courier New', monospace;
+    }
+
+    /* Summary bar */
+    .summary-bar {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      z-index: 1000; display: flex; gap: 1.2rem; align-items: center;
+      background: rgba(7,11,20,0.9); padding: 6px 16px; border-radius: 8px;
+      border: 1px solid var(--card-border); font-size: 0.75rem; color: var(--dim);
+    }
+    .summary-stat { display: flex; align-items: center; gap: 0.3rem; }
+    .summary-val { font-weight: 700; color: var(--bright); }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      body { height: auto; min-height: 100vh; overflow-y: auto; grid-template-rows: auto auto auto; }
+      .main { grid-template-columns: 1fr; grid-template-rows: 50vh auto; }
+      .map-panel { order: 1; min-height: 50vh; border-right: none; }
+      .sidebar { order: 2; border-right: none; border-top: 1px solid var(--card-border); max-height: 50vh; }
+      .filters { padding: 6px 12px; gap: 4px; }
+      .filter-search { width: 100%; margin-left: 0; margin-top: 4px; }
+      .header { padding: 6px 12px; }
+      .event-card { padding: 8px 12px; }
+      .summary-bar { font-size: 0.65rem; padding: 4px 10px; gap: 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div>
+      <div class="header-title">&#9992; MICHIGAN FLY-INS 2026</div>
+      <div class="header-sub">60 events at 45 airports across Michigan</div>
+    </div>
+  </div>
+  <a href="/" class="back-link">&#8592; KGRR Tracker</a>
+</div>
+
+<div class="filters" id="filterBar">
+  <button class="filter-pill active" data-filter="all" onclick="setFilter('all',this)">All</button>
+  <button class="filter-pill recurring" data-filter="recurring" onclick="setFilter('recurring',this)">Weekly</button>
+  <button class="filter-pill" data-filter="5" onclick="setFilter('5',this)">May</button>
+  <button class="filter-pill" data-filter="6" onclick="setFilter('6',this)">Jun</button>
+  <button class="filter-pill" data-filter="7" onclick="setFilter('7',this)">Jul</button>
+  <button class="filter-pill" data-filter="8" onclick="setFilter('8',this)">Aug</button>
+  <button class="filter-pill" data-filter="9" onclick="setFilter('9',this)">Sep</button>
+  <input type="text" class="filter-search" id="searchInput" placeholder="Search events..." oninput="applyFilters()">
+  <span class="event-count" id="eventCount"></span>
+</div>
+
+<div class="main">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="map-panel">
+    <div id="map"></div>
+    <div class="layer-toggle">
+      <button class="layer-btn active" id="btnVFR" onclick="setLayer('vfr')">VFR Chart</button>
+      <button class="layer-btn" id="btnTopo" onclick="setLayer('topo')">Topo</button>
+      <button class="layer-btn" id="btnDark" onclick="setLayer('dark')">Dark</button>
+    </div>
+    <div class="summary-bar" id="summaryBar"></div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════
+// Airport Database
+// ════════════════════════════════════════════════════
+const AIRPORTS = {
+  'FPK':  { name: 'Fitch H Beach Airport', city: 'Charlotte', lat: 42.5714, lon: -84.8114, elev: 901 },
+  '45G':  { name: 'Spencer J Hardy Airport', city: 'Brighton', lat: 42.5358, lon: -83.7447, elev: 963 },
+  'RQB':  { name: 'Roben-Hood Airport', city: 'Big Rapids', lat: 43.7226, lon: -85.5039, elev: 983 },
+  '50G':  { name: 'Chesaning-Shafley Field', city: 'Chesaning', lat: 43.1786, lon: -84.1153, elev: 643 },
+  'BIV':  { name: 'Tulip City Airport', city: 'Holland', lat: 42.7433, lon: -86.1072, elev: 698 },
+  'Y88':  { name: 'Interlochen Air Center', city: 'Interlochen', lat: 44.6350, lon: -85.7900, elev: 890 },
+  'IKW':  { name: 'Jack Barstow Airport', city: 'Midland', lat: 43.6647, lon: -84.2672, elev: 642 },
+  '9G2':  { name: 'Price Airport', city: 'Linden', lat: 42.8009, lon: -83.7842, elev: 928 },
+  'MBS':  { name: 'MBS International Airport', city: 'Saginaw', lat: 43.5329, lon: -84.0796, elev: 668 },
+  'APN':  { name: 'Alpena County Regional', city: 'Alpena', lat: 45.0781, lon: -83.5603, elev: 690 },
+  '59M':  { name: 'Antrim County Airport', city: 'Torch Lake', lat: 44.9167, lon: -85.1333, elev: 640 },
+  'FFX':  { name: 'Fremont Municipal Airport', city: 'Fremont', lat: 43.4419, lon: -85.9944, elev: 788 },
+  '51G':  { name: 'Clio Prices Airport', city: 'Clio', lat: 43.1770, lon: -83.7330, elev: 760 },
+  'ONZ':  { name: 'Grosse Ile Municipal', city: 'Grosse Ile', lat: 42.0986, lon: -83.1608, elev: 588 },
+  '3GM':  { name: 'Grand Haven Memorial Airpark', city: 'Grand Haven', lat: 43.0342, lon: -86.1984, elev: 604 },
+  'D11':  { name: 'Thompson Field', city: 'Weidman', lat: 43.7517, lon: -84.9533, elev: 910 },
+  'OEB':  { name: 'Branch County Memorial', city: 'Coldwater', lat: 41.9336, lon: -85.0453, elev: 959 },
+  'HTL':  { name: 'Roscommon County-Blodgett', city: 'Houghton Lake', lat: 44.3597, lon: -84.6711, elev: 1150 },
+  'MKG':  { name: 'Muskegon County Airport', city: 'Muskegon', lat: 43.1695, lon: -86.2382, elev: 629 },
+  'IMT':  { name: 'Ford Airport', city: 'Kingsford', lat: 45.8184, lon: -88.1146, elev: 1182 },
+  '3DA':  { name: 'Dalton Airport', city: 'Flushing', lat: 43.0653, lon: -83.8364, elev: 750 },
+  'ARB':  { name: 'Ann Arbor Municipal', city: 'Ann Arbor', lat: 42.2230, lon: -83.7456, elev: 839 },
+  'TEW':  { name: 'Mason Jewett Field', city: 'Mason', lat: 42.5659, lon: -84.4231, elev: 920 },
+  '35D':  { name: 'Padgham Field', city: 'Allegan', lat: 42.5300, lon: -85.8283, elev: 710 },
+  'Y31':  { name: 'West Branch Community', city: 'West Branch', lat: 44.2444, lon: -84.1794, elev: 898 },
+  '1D2':  { name: 'Canton-Plymouth-Mettetal', city: 'Plymouth', lat: 42.3472, lon: -83.4581, elev: 724 },
+  '6Y3':  { name: 'North Fox Island Airport', city: 'North Fox Island', lat: 45.4822, lon: -85.6600, elev: 618 },
+  '3CM':  { name: 'James Clements Municipal', city: 'Bay City', lat: 43.5467, lon: -83.8906, elev: 624 },
+  '57D':  { name: 'Ray Community Airport', city: 'Ray', lat: 42.7683, lon: -82.8942, elev: 753 },
+  'Y47':  { name: 'Oakland Southwest Airport', city: 'New Hudson', lat: 42.4886, lon: -83.6339, elev: 913 },
+  '9D9':  { name: 'Hastings City-Barry County', city: 'Hastings', lat: 42.6603, lon: -85.3467, elev: 796 },
+  'MI09': { name: 'Schoolcraft Airstrip', city: 'Schoolcraft', lat: 42.1114, lon: -85.6339, elev: 810 },
+  '80D':  { name: 'Harrison Doan Airport', city: 'Harrison', lat: 44.0611, lon: -84.7944, elev: 1140 },
+  'Y83':  { name: 'Sandusky City Airport', city: 'Sandusky', lat: 43.4197, lon: -82.8292, elev: 810 },
+  '51M':  { name: 'Mio Airport', city: 'Mio', lat: 44.6517, lon: -84.1503, elev: 980 },
+  '6D9':  { name: 'Iosco County Airport', city: 'East Tawas', lat: 44.2497, lon: -83.5603, elev: 606 },
+  'OZW':  { name: 'Livingston County Airport', city: 'Howell', lat: 42.6292, lon: -83.9831, elev: 946 },
+  'ANJ':  { name: 'Sanderson Field', city: 'Sault Ste Marie', lat: 46.4792, lon: -84.3683, elev: 722 },
+  '8D4':  { name: 'Sparta Airport', city: 'Sparta', lat: 43.1381, lon: -85.6706, elev: 860 },
+  'LWA':  { name: 'South Haven Area Regional', city: 'South Haven', lat: 42.3512, lon: -86.2561, elev: 666 },
+  'OSC':  { name: 'Oscoda-Wurtsmith Airport', city: 'Oscoda', lat: 44.4515, lon: -83.3940, elev: 634 },
+  '5M6':  { name: 'Sugar Springs Airpark', city: 'Gladwin', lat: 43.9800, lon: -84.4400, elev: 790 },
+  '4N0':  { name: "Newman's Airport", city: 'Kalamazoo', lat: 42.2200, lon: -85.5900, elev: 840 },
+  'RNP':  { name: 'Owosso Community Airport', city: 'Owosso', lat: 42.9933, lon: -84.1394, elev: 736 },
+  '6Y9':  { name: 'Sidnaw Airport', city: 'Sidnaw', lat: 46.5422, lon: -88.6839, elev: 1595 },
+};
+
+// ════════════════════════════════════════════════════
+// Event Database (from 2026 Michigan Fly-ins spreadsheet)
+// ════════════════════════════════════════════════════
+const EVENTS = [
+  // Recurring weekly events
+  { id: 1,  code: 'FPK', name: 'Hot Dog Night', type: 'recurring', recurring: 'Thursdays', time: '6:00 PM \u2013 Dark' },
+  { id: 2,  code: '45G', name: 'Breakfast', type: 'recurring', recurring: 'Saturdays', time: '9:00 AM' },
+  { id: 3,  code: 'RQB', name: 'Lunch', type: 'recurring', recurring: 'Saturdays', time: '11:00 AM' },
+  { id: 4,  code: '50G', name: 'Ice Cream', type: 'recurring', recurring: 'Tuesdays', time: '6:00 PM' },
+
+  // May
+  { id: 5,  code: 'BIV', name: 'Tulip Time Fly-in', type: 'single', date: '2026-05-02', time: '9:00 AM \u2013 Noon' },
+  { id: 6,  code: 'Y88', name: 'Summer Kickoff', type: 'single', date: '2026-05-02', time: '2:00 \u2013 8:00 PM' },
+  { id: 7,  code: 'IKW', name: 'Pancake Breakfast', type: 'single', date: '2026-05-02', time: '7:00 \u2013 11:00 AM' },
+  { id: 8,  code: '9G2', name: 'Fly-in Drive-in', type: 'single', date: '2026-05-16', time: '8:00 AM \u2013 1:00 PM' },
+  { id: 9,  code: 'MBS', name: 'Pancake Breakfast / 5K', type: 'single', date: '2026-05-16', time: '7:30 AM \u2013 Noon' },
+  { id: 10, code: 'APN', name: 'Fly-in Lunch', type: 'single', date: '2026-05-16', time: '10:30 AM \u2013 2:00 PM' },
+  { id: 11, code: '59M', name: 'Breakfast + Pig Roast', type: 'multi', startDate: '2026-05-22', endDate: '2026-05-26', time: 'Bfast 23rd 8\u201311:30, Pig Roast 24th' },
+  { id: 12, code: 'FFX', name: 'Breakfast, Red Stars Flyover', type: 'single', date: '2026-05-23', time: '7:00 AM' },
+  { id: 13, code: '51G', name: 'Fly-in Poker Run', type: 'multi', startDate: '2026-05-29', endDate: '2026-05-31', time: 'May 29\u201331' },
+  { id: 14, code: 'ONZ', name: 'Islandfest', type: 'multi', startDate: '2026-05-29', endDate: '2026-05-31', time: 'May 29\u201331' },
+
+  // June
+  { id: 15, code: '3GM', name: 'Pancake Breakfast', type: 'single', date: '2026-06-06', time: '8:00 AM \u2013 Noon' },
+  { id: 16, code: 'D11', name: 'Fly-in', type: 'single', date: '2026-06-06', time: '7:00 \u2013 11:00 AM' },
+  { id: 17, code: 'OEB', name: '78th Annual Pancake Fly-in', type: 'single', date: '2026-06-07', time: '7:00 AM \u2013 Noon' },
+  { id: 18, code: 'HTL', name: 'Pancake Breakfast', type: 'single', date: '2026-06-07', time: '7:00 \u2013 11:00 AM' },
+  { id: 19, code: 'MKG', name: 'Pancake Breakfast', type: 'single', date: '2026-06-13', time: '8:00 AM \u2013 Noon' },
+  { id: 20, code: 'IMT', name: 'Fly-in, Food Truck, STOL', type: 'single', date: '2026-06-13', time: 'TBD' },
+  { id: 21, code: 'IKW', name: 'Powered Paraglider Fly-in', type: 'multi', startDate: '2026-06-11', endDate: '2026-06-14', time: 'Jun 11\u201314' },
+  { id: 22, code: '3DA', name: 'Pancake Breakfast', type: 'single', date: '2026-06-14', time: '8:00 \u2013 11:00 AM' },
+  { id: 23, code: 'ARB', name: 'Pancake Breakfast (EAA 333)', type: 'single', date: '2026-06-14', time: '8:00 \u2013 11:00 AM' },
+  { id: 24, code: 'TEW', name: 'Pancake Breakfast', type: 'single', date: '2026-06-14', time: '7:00 \u2013 11:00 AM' },
+  { id: 25, code: '35D', name: 'Pancake Bfast, Car Show, Food Truck', type: 'single', date: '2026-06-20', time: '7:00 AM \u2013 3:00 PM' },
+  { id: 26, code: 'Y31', name: 'Pancake Breakfast', type: 'single', date: '2026-06-20', time: '8:00 AM \u2013 Noon' },
+  { id: 27, code: 'APN', name: 'Fly-in Lunch', type: 'single', date: '2026-06-20', time: '10:30 AM \u2013 2:00 PM' },
+  { id: 28, code: '1D2', name: 'Pancake Breakfast', type: 'single', date: '2026-06-21', time: '7:00 \u2013 11:00 AM' },
+  { id: 30, code: '3CM', name: 'Pancake Breakfast', type: 'single', date: '2026-06-21', time: '7:00 AM \u2013 Noon' },
+  { id: 31, code: '57D', name: 'Pancake Breakfast', type: 'single', date: '2026-06-27', time: '7:30 \u2013 11:30 AM' },
+  { id: 32, code: 'RQB', name: 'Pancake Breakfast', type: 'single', date: '2026-06-27', time: '7:00 \u2013 11:00 AM' },
+  { id: 33, code: 'Y47', name: 'Fly-in / Food Trucks', type: 'single', date: '2026-06-27', time: '8:00 AM \u2013 3:00 PM' },
+  { id: 34, code: '9D9', name: 'Pancake Breakfast', type: 'single', date: '2026-06-27', time: '7:00 AM \u2013 Noon' },
+  { id: 35, code: 'MI09', name: 'Pancake Breakfast', type: 'single', date: '2026-06-27', time: '7:00 AM \u2013 Noon' },
+  { id: 36, code: '80D', name: 'Fly-in', type: 'single', date: '2026-06-27', time: '10:00 AM \u2013 2:00 PM' },
+  { id: 37, code: 'Y83', name: 'Breakfast', type: 'single', date: '2026-06-28', time: '7:00 AM' },
+
+  // July
+  { id: 29, code: '6Y3', name: 'Work Party', type: 'single', date: '2026-07-11', time: '7:00 \u2013 11:00 AM' },
+  { id: 38, code: '51M', name: 'Pancake Breakfast', type: 'single', date: '2026-07-11', time: '8:00 \u2013 11:00 AM' },
+  { id: 39, code: '6D9', name: 'Pancake Breakfast', type: 'single', date: '2026-07-12', time: '8:00 AM \u2013 Noon' },
+  { id: 40, code: 'OZW', name: 'Airport Open House', type: 'single', date: '2026-07-18', time: 'TBD' },
+  { id: 41, code: 'APN', name: 'Fly-in Lunch', type: 'single', date: '2026-07-18', time: '10:30 AM \u2013 2:00 PM' },
+
+  // August
+  { id: 42, code: 'ANJ', name: 'Fly-in Open House', type: 'single', date: '2026-08-08', time: '10:00 AM \u2013 4:00 PM' },
+  { id: 43, code: '8D4', name: 'Pancake Breakfast', type: 'single', date: '2026-08-08', time: '8:00 \u2013 11:00 AM' },
+  { id: 44, code: '45G', name: 'Fly-in Cruise-in', type: 'single', date: '2026-08-08', time: 'TBD' },
+  { id: 45, code: 'LWA', name: 'Pancake Breakfast', type: 'single', date: '2026-08-09', time: '7:00 AM \u2013 Noon' },
+  { id: 46, code: 'BIV', name: 'Pancakes, 5K, Food Trucks, Car Show', type: 'single', date: '2026-08-15', time: '9:00 AM \u2013 Noon' },
+  { id: 47, code: 'TEW', name: 'Pancake Breakfast', type: 'single', date: '2026-08-15', time: '7:30 AM \u2013 Noon' },
+  { id: 48, code: 'OSC', name: 'Pancake Breakfast', type: 'single', date: '2026-08-15', time: '8:00 \u2013 11:00 AM' },
+  { id: 49, code: 'APN', name: 'Fly-in Lunch', type: 'single', date: '2026-08-15', time: '10:30 AM \u2013 2:00 PM' },
+  { id: 50, code: 'OSC', name: 'Pancake Breakfast', type: 'single', date: '2026-08-16', time: '8:00 \u2013 11:00 AM' },
+  { id: 51, code: 'MKG', name: 'Airshow / Fly-in', type: 'multi', startDate: '2026-08-21', endDate: '2026-08-23', time: 'Aug 21\u201323' },
+  { id: 52, code: '5M6', name: 'Pancake Breakfast', type: 'single', date: '2026-08-22', time: '8:00 \u2013 11:00 AM' },
+  { id: 53, code: '4N0', name: 'Fly-in', type: 'single', date: '2026-08-22', time: '7:00 \u2013 11:00 AM' },
+  { id: 54, code: 'RNP', name: 'Campout Weekend', type: 'multi', startDate: '2026-08-28', endDate: '2026-08-30', time: 'Aug 28\u201330' },
+  { id: 55, code: 'RNP', name: 'Aviation Celebration Day', type: 'single', date: '2026-08-29', time: 'TBD' },
+  { id: 56, code: '50G', name: 'Great Lakes STOL', type: 'multi', startDate: '2026-08-28', endDate: '2026-08-30', time: 'Aug 28\u201330' },
+
+  // September
+  { id: 57, code: '6Y9', name: 'Fly-in Camp Out', type: 'multi', startDate: '2026-09-05', endDate: '2026-09-06', time: 'Sep 5\u20136' },
+  { id: 58, code: 'IKW', name: 'Pancake Breakfast', type: 'single', date: '2026-09-12', time: '7:00 \u2013 11:00 AM' },
+  { id: 59, code: '45G', name: 'Fly-in Camp Out', type: 'multi', startDate: '2026-09-18', endDate: '2026-09-20', time: 'Sep 18\u201320' },
+  { id: 60, code: 'APN', name: 'Fly-in Lunch', type: 'single', date: '2026-09-19', time: '10:30 AM \u2013 2:00 PM' },
+];
+
+// ════════════════════════════════════════════════════
+// State
+// ════════════════════════════════════════════════════
+let map, currentFilter = 'all', markers = {}, activeEventId = null;
+let vfrLayer, topoLayer, darkLayer, currentLayer = 'vfr';
+
+const MICHIGAN_CENTER = [44.3, -84.7];
+const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+
+// ════════════════════════════════════════════════════
+// Helpers
+// ════════════════════════════════════════════════════
+function parseDate(str) { const [y,m,d] = str.split('-').map(Number); return new Date(y, m-1, d); }
+
+function formatDate(str) {
+  const d = parseDate(str);
+  return `${DAY_NAMES[d.getDay()]}, ${MONTH_NAMES[d.getMonth()+1]} ${d.getDate()}`;
+}
+
+function formatDateShort(str) {
+  const d = parseDate(str);
+  return `${MONTH_NAMES[d.getMonth()+1]} ${d.getDate()}`;
+}
+
+function getEventDate(e) {
+  if (e.type === 'recurring') return null;
+  return e.date || e.startDate;
+}
+
+function getEventMonth(e) {
+  const d = getEventDate(e);
+  if (!d) return null;
+  return parseDate(d).getMonth() + 1;
+}
+
+function isUpcoming(e) {
+  const d = getEventDate(e);
+  if (!d) return false;
+  const eventDate = parseDate(d);
+  const diff = (eventDate - TODAY) / 86400000;
+  return diff >= 0 && diff <= 14;
+}
+
+function isToday(e) {
+  const d = getEventDate(e);
+  if (!d) return false;
+  return parseDate(d).getTime() === TODAY.getTime();
+}
+
+function isPast(e) {
+  if (e.type === 'recurring') return false;
+  const d = e.endDate || e.date || e.startDate;
+  return parseDate(d) < TODAY;
+}
+
+function getSortKey(e) {
+  if (e.type === 'recurring') return '0000-00-00';
+  return e.date || e.startDate;
+}
+
+// ════════════════════════════════════════════════════
+// Filtering
+// ════════════════════════════════════════════════════
+function getFilteredEvents() {
+  const search = document.getElementById('searchInput').value.toLowerCase().trim();
+  return EVENTS.filter(e => {
+    // Filter by category
+    if (currentFilter === 'recurring') {
+      if (e.type !== 'recurring') return false;
+    } else if (currentFilter !== 'all') {
+      const month = parseInt(currentFilter);
+      if (e.type === 'recurring') return false;
+      const em = getEventMonth(e);
+      if (em !== month) return false;
+    }
+    // Search filter
+    if (search) {
+      const apt = AIRPORTS[e.code] || {};
+      const haystack = [e.name, e.code, apt.city, apt.name, e.time, e.recurring].filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
+function setFilter(filter, btn) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilters();
+}
+
+function applyFilters() {
+  renderSidebar();
+  updateMarkers();
+}
+
+// ════════════════════════════════════════════════════
+// Sidebar Rendering
+// ════════════════════════════════════════════════════
+function renderSidebar() {
+  const events = getFilteredEvents();
+  const sidebar = document.getElementById('sidebar');
+  document.getElementById('eventCount').textContent = `${events.length} event${events.length !== 1 ? 's' : ''}`;
+
+  if (events.length === 0) {
+    sidebar.innerHTML = '<div class="no-events">No events match your filters</div>';
+    return;
+  }
+
+  // Group by date
+  const groups = {};
+  events.sort((a, b) => getSortKey(a).localeCompare(getSortKey(b)));
+  events.forEach(e => {
+    const key = e.type === 'recurring' ? 'recurring' : (e.date || e.startDate);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(e);
+  });
+
+  let html = '';
+  for (const [key, evts] of Object.entries(groups)) {
+    let headerText, headerClass = '';
+    if (key === 'recurring') {
+      headerText = 'Weekly Events';
+      headerClass = ' recurring';
+    } else {
+      headerText = formatDate(key);
+      const d = parseDate(key);
+      if (d.getTime() === TODAY.getTime()) headerText += ' <span style="color:var(--accent)">\u2022 TODAY</span>';
+      else if (d > TODAY && (d - TODAY) / 86400000 <= 7) headerText += ' <span style="color:#10b981">\u2022 This Week</span>';
+    }
+
+    html += `<div class="date-group"><div class="date-header${headerClass}">${headerText}</div>`;
+    evts.forEach(e => {
+      const apt = AIRPORTS[e.code] || {};
+      let badges = '';
+      if (isToday(e)) badges += '<span class="ec-badge today">Today</span>';
+      else if (isUpcoming(e)) badges += '<span class="ec-badge upcoming">Soon</span>';
+      if (e.type === 'multi') badges += '<span class="ec-badge multi">Multi-Day</span>';
+      if (e.type === 'recurring') badges += '<span class="ec-badge recurring-badge">' + e.recurring + '</span>';
+
+      const dateStr = e.type === 'multi'
+        ? `${formatDateShort(e.startDate)} \u2013 ${formatDateShort(e.endDate)}`
+        : (e.type === 'recurring' ? '' : '');
+
+      const pastClass = isPast(e) ? ' style="opacity:0.5"' : '';
+
+      html += `<div class="event-card${activeEventId === e.id ? ' active' : ''}" onclick="selectEvent(${e.id})"${pastClass}>
+        <div class="ec-top">
+          <span class="ec-code">${e.code}</span>
+          <span class="ec-city">${apt.city || ''}</span>
+          ${badges}
+        </div>
+        <div class="ec-name">${e.name}</div>
+        <div class="ec-time">${e.time}${dateStr ? ' \u2022 ' + dateStr : ''}</div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  sidebar.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════
+// Map Initialization
+// ════════════════════════════════════════════════════
+function initMap() {
+  map = L.map('map', {
+    zoomControl: false, attributionControl: false
+  }).setView(MICHIGAN_CENTER, 7);
+
+  // Tile layers
+  vfrLayer = L.tileLayer('https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/VFR_Sectional/MapServer/tile/{z}/{y}/{x}', {
+    minZoom: 5, maxZoom: 12,
+    errorTileUrl: '',
+  });
+
+  topoLayer = L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 16
+  });
+
+  darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd', maxZoom: 19
+  });
+
+  // Default to VFR chart, with dark as fallback if tiles fail
+  vfrLayer.addTo(map);
+  // Add dark layer underneath at low opacity as a safety net
+  darkLayer.addTo(map);
+  vfrLayer.setZIndex(10);
+  darkLayer.setZIndex(1);
+
+  // Add zoom control at bottom-right
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  document.querySelector('.leaflet-control-zoom').style.display = 'flex';
+  document.querySelector('.leaflet-control-zoom').style.flexDirection = 'column';
+
+  updateMarkers();
+  updateSummary();
+}
+
+function setLayer(layer) {
+  document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+
+  map.removeLayer(vfrLayer);
+  map.removeLayer(topoLayer);
+  map.removeLayer(darkLayer);
+
+  if (layer === 'vfr') {
+    darkLayer.addTo(map);
+    vfrLayer.addTo(map);
+    vfrLayer.setZIndex(10);
+    darkLayer.setZIndex(1);
+    document.getElementById('btnVFR').classList.add('active');
+  } else if (layer === 'topo') {
+    topoLayer.addTo(map);
+    document.getElementById('btnTopo').classList.add('active');
+  } else {
+    darkLayer.addTo(map);
+    document.getElementById('btnDark').classList.add('active');
+  }
+  currentLayer = layer;
+}
+
+// ════════════════════════════════════════════════════
+// Map Markers
+// ════════════════════════════════════════════════════
+function updateMarkers() {
+  // Remove existing markers
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+
+  const events = getFilteredEvents();
+
+  // Group events by airport
+  const byAirport = {};
+  events.forEach(e => {
+    if (!byAirport[e.code]) byAirport[e.code] = [];
+    byAirport[e.code].push(e);
+  });
+
+  for (const [code, evts] of Object.entries(byAirport)) {
+    const apt = AIRPORTS[code];
+    if (!apt) continue;
+
+    // Determine marker color based on event status
+    const hasToday = evts.some(isToday);
+    const hasUpcoming = evts.some(isUpcoming);
+    const allRecurring = evts.every(e => e.type === 'recurring');
+    const allPast = evts.every(isPast);
+
+    let dotColor, labelColor;
+    if (hasToday) { dotColor = '#f59e0b'; labelColor = '#f59e0b'; }
+    else if (hasUpcoming) { dotColor = '#10b981'; labelColor = '#10b981'; }
+    else if (allRecurring) { dotColor = '#f59e0b'; labelColor = '#f59e0b'; }
+    else if (allPast) { dotColor = '#475569'; labelColor = '#475569'; }
+    else { dotColor = '#14b8a6'; labelColor = '#14b8a6'; }
+
+    const iconHtml = `<div class="airport-marker">
+      <div class="airport-dot" style="background:${dotColor};border-color:${dotColor};"></div>
+      <div class="airport-label" style="color:${labelColor}">${code}</div>
+    </div>`;
+
+    const marker = L.marker([apt.lat, apt.lon], {
+      icon: L.divIcon({
+        className: '', html: iconHtml,
+        iconSize: [50, 28], iconAnchor: [25, 6]
+      })
+    }).addTo(map);
+
+    // Build popup
+    let popupHtml = `<div class="popup-header"><span class="popup-code">${code}</span> ${apt.name}</div>`;
+    popupHtml += `<div class="popup-city">${apt.city}, Michigan</div>`;
+    if (apt.elev) popupHtml += `<div class="popup-elev">Elevation: ${apt.elev.toLocaleString()}\u2032 MSL</div>`;
+    popupHtml += '<hr class="popup-divider">';
+
+    evts.forEach(e => {
+      let dateStr = '';
+      if (e.type === 'recurring') dateStr = e.recurring;
+      else if (e.type === 'multi') dateStr = `${formatDateShort(e.startDate)} \u2013 ${formatDateShort(e.endDate)}`;
+      else dateStr = formatDateShort(e.date);
+
+      popupHtml += `<div class="popup-event">
+        <div class="popup-event-name">${e.name}</div>
+        <div class="popup-event-date">${dateStr}</div>
+        <div class="popup-event-time">${e.time}</div>
+      </div>`;
+    });
+
+    popupHtml += `<a class="popup-link" href="https://www.airnav.com/airport/${code}" target="_blank" rel="noopener">\u2197 Full airport info on AirNav</a>`;
+
+    marker.bindPopup(popupHtml, { maxWidth: 280, minWidth: 200 });
+    markers[code] = marker;
+  }
+}
+
+function selectEvent(id) {
+  activeEventId = id;
+  const event = EVENTS.find(e => e.id === id);
+  if (!event) return;
+
+  const apt = AIRPORTS[event.code];
+  if (!apt) return;
+
+  // Fly to airport
+  map.flyTo([apt.lat, apt.lon], 10, { duration: 0.8 });
+
+  // Open popup
+  const marker = markers[event.code];
+  if (marker) marker.openPopup();
+
+  // Update sidebar highlighting
+  document.querySelectorAll('.event-card').forEach(c => c.classList.remove('active'));
+  const cards = document.querySelectorAll('.event-card');
+  cards.forEach(c => {
+    if (c.onclick && c.onclick.toString().includes(id)) c.classList.add('active');
+  });
+  // Re-render to update active state
+  renderSidebar();
+}
+
+function updateSummary() {
+  const totalEvents = EVENTS.length;
+  const totalAirports = Object.keys(AIRPORTS).length;
+  const upcoming = EVENTS.filter(isUpcoming).length;
+  const recurring = EVENTS.filter(e => e.type === 'recurring').length;
+
+  document.getElementById('summaryBar').innerHTML = `
+    <div class="summary-stat"><span class="summary-val">${totalEvents}</span> events</div>
+    <div class="summary-stat"><span class="summary-val">${totalAirports}</span> airports</div>
+    <div class="summary-stat"><span class="summary-val">${recurring}</span> weekly</div>
+    ${upcoming > 0 ? `<div class="summary-stat"><span class="summary-val" style="color:#10b981">${upcoming}</span> upcoming</div>` : ''}
+  `;
+}
+
+// ════════════════════════════════════════════════════
+// Initialize
+// ════════════════════════════════════════════════════
+initMap();
+renderSidebar();
+</script>
+</body>
+</html>

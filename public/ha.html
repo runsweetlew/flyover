@@ -10,6 +10,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0e17; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; height: 100vh; overflow: hidden; position: relative; }
     #map { width: 100%; height: 100%; }
+    .map-bright { filter: brightness(2.2) contrast(1.15) saturate(1.5); }
     .leaflet-control-attribution, .leaflet-control-zoom { display: none !important; }
 
     .info-overlay {
@@ -74,6 +75,22 @@
     }
     .rwy-num { font-size: 8px; font-weight: 800; color: #94a3b8; letter-spacing: 0.04em; text-shadow: 0 1px 2px rgba(0,0,0,0.9); white-space: nowrap; }
     .kgrr-text { font-size: 10px; font-weight: 800; color: #cbd5e1; letter-spacing: 0.1em; text-shadow: 0 1px 3px rgba(0,0,0,0.9); white-space: nowrap; }
+
+    /* ── Mobile responsive ── */
+    @media (max-width: 768px) {
+      .info-overlay { bottom: 6px; left: 6px; right: 6px; padding: 10px 12px; gap: 4px; }
+      .info-main { gap: 8px; }
+      .info-photo { width: 100px; height: 68px; }
+      .info-flight { font-size: 1.2rem; }
+      .info-status { font-size: 0.65rem; padding: 2px 6px; }
+      .info-sub { font-size: 0.75rem; }
+      .info-route { font-size: 0.65rem; }
+      .info-stats { gap: 10px; }
+      .info-stat-val { font-size: 0.9rem; }
+      .info-stat-lbl { font-size: 0.55rem; }
+      .wx-text { font-size: 0.6rem; }
+      .info-count { font-size: 0.55rem; }
+    }
   </style>
 </head>
 <body>
@@ -95,7 +112,7 @@ const RUNWAYS = [
   { name1:'17',  lat1:42.8894, lon1:-85.5192, name2:'35',  lat2:42.8664, lon2:-85.5144, widthFt:150 },
 ];
 
-let map, planeMarkers = {}, trailLines = [], trailPositions = {};
+let map, planeMarkers = {}, trailLines = [];
 let lastServerUpdate = null, lastClosestIcao = null;
 let cycleIndex = 0, cycleList = [], lastCycleTime = 0, lastData = null;
 const CYCLE_INTERVAL = 15000;
@@ -152,10 +169,12 @@ function computeRunwayCorners(lat1, lon1, lat2, lon2, widthFt) {
   return [[lat1+pLat,lon1+pLon],[lat1-pLat,lon1-pLon],[lat2-pLat,lon2-pLon],[lat2+pLat,lon2+pLon]];
 }
 
+const isMobile = window.matchMedia('(max-width: 768px)').matches;
+
 function initMap() {
-  map = L.map('map', { zoomControl:false, attributionControl:false, dragging:false, scrollWheelZoom:false, doubleClickZoom:false, touchZoom:false, keyboard:false })
+  map = L.map('map', { zoomControl:false, attributionControl:false, dragging:isMobile, scrollWheelZoom:false, doubleClickZoom:isMobile, touchZoom:isMobile, keyboard:false })
     .setView([(HOME.lat+KGRR.lat)/2,(HOME.lon+KGRR.lon)/2], 11);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains:'abcd', maxZoom:19 }).addTo(map);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains:'abcd', maxZoom:19, className:'map-bright' }).addTo(map);
 
   RUNWAYS.forEach(rwy => {
     L.polygon(computeRunwayCorners(rwy.lat1,rwy.lon1,rwy.lat2,rwy.lon2,rwy.widthFt), { color:'#94a3b8', weight:1, fillColor:'#475569', fillOpacity:0.8 }).addTo(map);
@@ -169,20 +188,12 @@ function initMap() {
   }).addTo(map);
 }
 
-function updateMap(flights, featuredIcao) {
+function updateMap(flights, featuredIcao, alwaysShowIcao, centerOnFeatured) {
   if (!map) return;
   Object.values(planeMarkers).forEach(m => map.removeLayer(m));
   planeMarkers = {};
   trailLines.forEach(l => map.removeLayer(l));
   trailLines = [];
-
-  const activeIcaos = new Set(flights.map(f => f.icao));
-  flights.forEach(f => {
-    if (!trailPositions[f.icao]) trailPositions[f.icao] = [];
-    const tr = trailPositions[f.icao], last = tr[tr.length-1];
-    if (!last || last[0] !== f.lat || last[1] !== f.lon) { tr.push([f.lat,f.lon,f.altitudeFt||0]); if (tr.length>120) tr.shift(); }
-  });
-  for (const k of Object.keys(trailPositions)) { if (!activeIcaos.has(k)) delete trailPositions[k]; }
 
   const bounds = L.latLngBounds([HOME.lat,HOME.lon],[KGRR.lat,KGRR.lon]);
   let featured = null;
@@ -198,10 +209,11 @@ function updateMap(flights, featuredIcao) {
     planeMarkers[f.icao] = m;
   });
 
-  if (featuredIcao && trailPositions[featuredIcao] && trailPositions[featuredIcao].length > 1) {
-    const pts = trailPositions[featuredIcao];
-    for (let i=1; i<pts.length; i++) {
-      const seg = L.polyline([[pts[i-1][0],pts[i-1][1]],[pts[i][0],pts[i][1]]], { color:altColor(pts[i][2]), weight:3, opacity:0.7 }).addTo(map);
+  const featuredFl = cycleList.find(f => f.icao === featuredIcao);
+  const trailPts = featuredFl && featuredFl.trail ? featuredFl.trail : [];
+  if (trailPts.length > 1) {
+    for (let i=1; i<trailPts.length; i++) {
+      const seg = L.polyline([[trailPts[i-1][0],trailPts[i-1][1]],[trailPts[i][0],trailPts[i][1]]], { color:altColor(trailPts[i][2]), weight:3, opacity:0.7 }).addTo(map);
       trailLines.push(seg);
     }
   }
@@ -216,7 +228,13 @@ function updateMap(flights, featuredIcao) {
     bounds.extend([featured.lat,featured.lon]);
   }
 
-  map.fitBounds(bounds.pad(0.05), { animate:true, duration:0.8, maxZoom:16 });
+  if (centerOnFeatured && featured) {
+    map.setView([featured.lat, featured.lon], 10, { animate:true, duration:0.8 });
+  } else {
+    const homeBounds = L.latLngBounds([HOME.lat, HOME.lon], [KGRR.lat, KGRR.lon]);
+    if (featured) homeBounds.extend([featured.lat, featured.lon]);
+    map.fitBounds(homeBounds.pad(0.05), { animate:true, duration:0.8, maxZoom:16 });
+  }
 }
 
 function renderOverlay(c, wx, total, kgrr) {
@@ -241,7 +259,9 @@ function renderOverlay(c, wx, total, kgrr) {
 
   // Route
   let routeHtml = '';
-  if (c.status === 'ARRIVING') routeHtml = '<div class="info-route">\u2708 Arriving at <b>KGRR</b></div>';
+  if (c.routeOrigin && c.routeDest) {
+    routeHtml = `<div class="info-route">\u2708 <b>${c.routeOrigin}</b> \u2192 <b>${c.routeDest}</b></div>`;
+  } else if (c.status === 'ARRIVING') routeHtml = '<div class="info-route">\u2708 Arriving at <b>KGRR</b></div>';
   else if (c.status === 'DEPARTING') routeHtml = '<div class="info-route">\u2708 Departing <b>KGRR</b></div>';
   else if (c.status === 'KGRR AREA') routeHtml = '<div class="info-route">\u2708 In <b>KGRR</b> area</div>';
   else routeHtml = '<div class="info-route">\u2708 Transiting area</div>';
@@ -311,7 +331,8 @@ function renderData(d) {
   if (cycleIndex >= cycleList.length) cycleIndex = 0;
   const c = cycleList[cycleIndex];
   renderOverlay(c, d.weather, d.totalInArea, d.kgrrCount);
-  updateMap(d.flights || [], c.icao);
+  const closestHomeIcao = d.closest ? d.closest.icao : null;
+  updateMap(d.flights || [], c.icao, closestHomeIcao, c.isTracked);
 }
 
 async function fetchData() {

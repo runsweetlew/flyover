@@ -29,6 +29,26 @@ let flightData = {
 let lastPositionChange = {};
 let lastPositions = {}; // icao -> {lat, lon}
 
+// Server-side trail storage: icao -> [[lat, lon, altFt], ...]
+let serverTrails = {};
+const MAX_TRAIL_POINTS = 1000; // ~2+ hours at 8s polling
+
+// FR24 data (primary source for GRR flights)
+let routeCache = {}; // icaoHex -> { origin, dest, flightNum, airlineIcao, onGround, heading, altitude, speed, lat, lon }
+let fr24RawFeed = {}; // raw FR24 feed for processFR24Feed
+let routeCacheTs = 0;
+const ROUTE_TTL = 15000; // refresh every 15s (FR24 is now primary)
+
+// Last known info for tracked planes (persists to disk across restarts)
+const DATA_DIR = path.join(__dirname, 'data');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+const TRACKED_CACHE_FILE = path.join(DATA_DIR, 'tracked-cache.json');
+let trackedLastSeen = {}; // registration -> { routeOrigin, routeDest, airport, lat, lon, altitudeFt, ts }
+try {
+  trackedLastSeen = JSON.parse(fs.readFileSync(TRACKED_CACHE_FILE, 'utf8'));
+  console.log(`Loaded tracked cache: ${Object.keys(trackedLastSeen).join(', ')}`);
+} catch (e) { /* no cache file yet */ }
+
 const photoCache = new Map(); // icao -> { url, photographer, link, ts }
 const PHOTO_TTL = 3600000; // 1 hour
 
@@ -178,18 +198,20 @@ function fetchJSON(url) {
 // ============================================
 // Photo Fetcher (planespotters.net)
 // ============================================
-async function getPhoto(icao) {
+async function getPhoto(icao, registration) {
   if (!icao) return null;
   const hex = icao.toUpperCase();
   const cached = photoCache.get(hex);
-  if (cached && Date.now() - cached.ts < PHOTO_TTL) return cached;
+  // Successful photos cache for 1hr; empty results only 15min so we retry sooner
+  if (cached && Date.now() - cached.ts < (cached.url ? PHOTO_TTL : 900000)) return cached;
 
+  // Try 1: by ICAO hex (prefer full resolution)
   try {
     const data = await fetchJSON(`https://api.planespotters.net/pub/photos/hex/${hex}`);
     if (data.photos && data.photos.length > 0) {
       const p = data.photos[0];
       const result = {
-        url: p.thumbnail_large ? p.thumbnail_large.src : (p.thumbnail ? p.thumbnail.src : null),
+        url: p.src || (p.thumbnail_large ? p.thumbnail_large.src : (p.thumbnail ? p.thumbnail.src : null)),
         fullUrl: p.src || null,
         photographer: p.photographer || null,
         link: p.link || null,
@@ -198,9 +220,63 @@ async function getPhoto(icao) {
       photoCache.set(hex, result);
       return result;
     }
-  } catch (err) {
-    // Silently fail — photo is optional
+  } catch (err) { /* continue to fallback */ }
+
+  // Try 2: planespotters by registration (better coverage for GA)
+  if (registration) {
+    try {
+      const data = await fetchJSON(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(registration)}`);
+      if (data.photos && data.photos.length > 0) {
+        const p = data.photos[0];
+        const result = {
+          url: p.src || (p.thumbnail_large ? p.thumbnail_large.src : (p.thumbnail ? p.thumbnail.src : null)),
+          fullUrl: p.src || null,
+          photographer: p.photographer || null,
+          link: p.link || null,
+          ts: Date.now()
+        };
+        photoCache.set(hex, result);
+        return result;
+      }
+    } catch (err) { /* continue */ }
   }
+
+  // Try 3: airport-data.com by ICAO hex (great GA coverage)
+  try {
+    const data = await fetchJSON(`https://airport-data.com/api/ac_thumb.json?m=${hex}&n=1`);
+    if (data.status === 200 && data.count > 0 && data.data && data.data[0]) {
+      const ad = data.data[0];
+      const result = {
+        url: ad.image || null,
+        fullUrl: ad.link || null,
+        photographer: ad.photographer || null,
+        link: ad.link || null,
+        ts: Date.now()
+      };
+      photoCache.set(hex, result);
+      return result;
+    }
+  } catch (err) { /* continue */ }
+
+  // Try 4: airport-data.com by registration
+  if (registration) {
+    try {
+      const data = await fetchJSON(`https://airport-data.com/api/ac_thumb.json?r=${encodeURIComponent(registration)}&n=1`);
+      if (data.status === 200 && data.count > 0 && data.data && data.data[0]) {
+        const ad = data.data[0];
+        const result = {
+          url: ad.image || null,
+          fullUrl: ad.link || null,
+          photographer: ad.photographer || null,
+          link: ad.link || null,
+          ts: Date.now()
+        };
+        photoCache.set(hex, result);
+        return result;
+      }
+    } catch (err) { /* continue */ }
+  }
+
   const empty = { url: null, fullUrl: null, photographer: null, link: null, ts: Date.now() };
   photoCache.set(hex, empty);
   return empty;
@@ -209,13 +285,14 @@ async function getPhoto(icao) {
 // ============================================
 // Weather Fetcher (aviationweather.gov METAR)
 // ============================================
-async function getWeather() {
-  if (weatherCache.data && Date.now() - weatherCache.ts < WEATHER_TTL) {
+async function getWeather(icao) {
+  const id = (icao || 'KGRR').toUpperCase();
+  if (id === 'KGRR' && weatherCache.data && Date.now() - weatherCache.ts < WEATHER_TTL) {
     return weatherCache.data;
   }
 
   try {
-    const data = await fetchJSON('https://aviationweather.gov/api/data/metar?ids=KGRR&format=json');
+    const data = await fetchJSON(`https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(id)}&format=json`);
     if (Array.isArray(data) && data.length > 0) {
       const m = data[0];
       // Parse temperature C -> F
@@ -271,7 +348,7 @@ async function getWeather() {
         wxString: m.wxString || null
       };
 
-      weatherCache = { data: weather, ts: Date.now() };
+      if (id === 'KGRR') weatherCache = { data: weather, ts: Date.now() };
       return weather;
     }
   } catch (err) {
@@ -300,8 +377,9 @@ function classifyFlight(distKGRR, altFt, vertRate) {
 function processAdsbLol(aircraft) {
   if (!Array.isArray(aircraft)) return [];
   return aircraft
-    .filter(ac => ac.lat != null && ac.lon != null && ac.alt_baro !== 'ground')
+    .filter(ac => ac.lat != null && ac.lon != null)
     .map(ac => {
+      const adsbGround = ac.alt_baro === 'ground';
       const dHome = distanceMi(HOME.lat, HOME.lon, ac.lat, ac.lon);
       const dKGRR = distanceMi(KGRR.lat, KGRR.lon, ac.lat, ac.lon);
       const bHome = bearingDeg(HOME.lat, HOME.lon, ac.lat, ac.lon);
@@ -309,7 +387,37 @@ function processAdsbLol(aircraft) {
       const airline = getAirline(callsign);
       const altFt = typeof ac.alt_baro === 'number' ? ac.alt_baro : (ac.alt_geom || null);
       const vertRate = ac.baro_rate || 0;
-      const status = classifyFlight(dKGRR, altFt, vertRate);
+      // Merge FR24 data: routes, on_ground, runway
+      const route = routeCache[(ac.hex || '').toLowerCase()];
+      const routeOrigin = route ? route.origin : null;
+      const routeDest = route ? route.dest : null;
+      const fr24OnGround = route ? route.onGround : false;
+
+      // Determine landing/runway status
+      const heading = ac.track != null ? Math.round(ac.track) : null;
+      let runway = null;
+      let onGround = adsbGround || fr24OnGround;
+
+      // Also detect on-ground via AGL if near KGRR
+      if (!onGround && dKGRR < 2) {
+        const agl = altFt != null ? altFt - 794 : null;
+        if (agl != null && agl < 200) onGround = true;
+      }
+
+      // Determine runway when on ground at KGRR
+      if (onGround && dKGRR < 3) {
+        // Use FR24 heading if available (more reliable on ground), fall back to adsb.lol track
+        const rwyHeading = (route && route.heading != null) ? route.heading : heading;
+        runway = determineRunway(rwyHeading, ac.lat);
+      }
+
+      // Route-based classification overrides heuristic
+      let status;
+      if (onGround && dKGRR < 3) {
+        status = routeOrigin === 'GRR' ? 'DEPARTING' : 'LANDED';
+      } else if (routeDest === 'GRR') status = 'ARRIVING';
+      else if (routeOrigin === 'GRR') status = 'DEPARTING';
+      else status = classifyFlight(dKGRR, altFt, vertRate);
 
       return {
         callsign,
@@ -321,7 +429,7 @@ function processAdsbLol(aircraft) {
         altitudeFt: altFt != null ? Math.round(altFt) : null,
         speedKts: ac.gs ? Math.round(ac.gs) : null,
         speedMph: ac.gs ? Math.round(ac.gs * 1.151) : null,
-        heading: ac.track != null ? Math.round(ac.track) : null,
+        heading,
         verticalRate: Math.round(vertRate),
         distHomeMi: Math.round(dHome * 10) / 10,
         distKGRRMi: Math.round(dKGRR * 10) / 10,
@@ -331,6 +439,10 @@ function processAdsbLol(aircraft) {
         status,
         isKGRR: status !== 'TRANSITING',
         isTracked: TRACKED_REGS.includes((ac.r || '').toUpperCase()),
+        onGround,
+        runway,
+        routeOrigin,
+        routeDest,
         lat: ac.lat, lon: ac.lon,
         icao: ac.hex
       };
@@ -382,56 +494,210 @@ function processOpenSky(states) {
 }
 
 // ============================================
+// Route Data (FlightRadar24)
+// ============================================
+async function pollRoutes() {
+  if (Date.now() - routeCacheTs < ROUTE_TTL) return;
+  try {
+    const data = await fetchJSON('https://data-cloud.flightradar24.com/zones/fcgi/feed.js?airport=GRR');
+    const routes = {};
+    const rawFeed = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (!Array.isArray(val) || val.length < 15) continue;
+      const hex = (val[0] || '').toLowerCase();
+      if (!hex) continue;
+      routes[hex] = {
+        origin: val[11] || null,
+        dest: val[12] || null,
+        flightNum: val[13] || null,
+        airlineIcao: val[18] || null,
+        onGround: val[14] === 1,
+        heading: typeof val[3] === 'number' ? val[3] : null,
+        altitude: typeof val[4] === 'number' ? val[4] : null,
+        speed: typeof val[5] === 'number' ? val[5] : null,
+        lat: val[1], lon: val[2]
+      };
+      rawFeed[key] = val; // preserve raw feed for processFR24Feed
+    }
+    routeCache = routes;
+    fr24RawFeed = rawFeed;
+    routeCacheTs = Date.now();
+  } catch (err) {
+    console.error(`[${ts()}] FR24 fetch failed: ${err.message}`);
+  }
+}
+
+// Determine runway from heading at KGRR
+// 08R/26L: ~80°/260° (southern parallel, lat ~42.879)
+// 08L/26R: ~80°/260° (northern parallel, lat ~42.890)
+// 17/35: ~170°/350°
+function determineRunway(heading, lat) {
+  if (heading == null) return null;
+  const h = ((heading % 360) + 360) % 360;
+  // Runway 08 direction (60°-100°)
+  if (h >= 60 && h <= 100) return lat > 42.884 ? '08L' : '08R';
+  // Runway 26 direction (240°-280°)
+  if (h >= 240 && h <= 280) return lat > 42.884 ? '26R' : '26L';
+  // Runway 17 direction (150°-190°)
+  if (h >= 150 && h <= 190) return '17';
+  // Runway 35 direction (330°-360° or 0°-10°)
+  if (h >= 330 || h <= 10) return '35';
+  return null;
+}
+
+// ============================================
+// Process FR24 Feed into Flight Objects
+// ============================================
+function processFR24Feed(data) {
+  const flights = [];
+  for (const [key, val] of Object.entries(data)) {
+    if (!Array.isArray(val) || val.length < 13) continue;
+    const lat = val[1], lon = val[2];
+    if (lat == null || lon == null) continue;
+    const hex = (val[0] || '').toLowerCase();
+    const heading = typeof val[3] === 'number' ? val[3] : null;
+    const altFt = typeof val[4] === 'number' ? val[4] : null;
+    const speedKts = typeof val[5] === 'number' ? val[5] : null;
+    const typeCode = val[8] || null;
+    const registration = val[9] || null;
+    const routeOrigin = val[11] || null;
+    const routeDest = val[12] || null;
+    const callsign = (val[16] || val[13] || '').trim();
+    const onGround = val[14] === 1;
+
+    const dHome = distanceMi(HOME.lat, HOME.lon, lat, lon);
+    const dKGRR = distanceMi(KGRR.lat, KGRR.lon, lat, lon);
+    const bHome = bearingDeg(HOME.lat, HOME.lon, lat, lon);
+    const airline = getAirline(callsign);
+
+    // Determine runway when on ground at KGRR
+    const runway = (onGround && dKGRR < 3) ? determineRunway(heading, lat) : null;
+
+    // Status with on_ground awareness
+    let status;
+    if (onGround && dKGRR < 3) {
+      status = routeOrigin === 'GRR' ? 'DEPARTING' : 'LANDED';
+    } else if (routeDest === 'GRR') status = 'ARRIVING';
+    else if (routeOrigin === 'GRR') status = 'DEPARTING';
+    else status = classifyFlight(dKGRR, altFt, 0);
+
+    flights.push({
+      callsign,
+      flightNumber: formatFlightNumber(callsign, airline) || registration || hex,
+      airline: airline ? airline.name : null,
+      aircraftType: formatAircraftType(typeCode),
+      typeCode,
+      registration,
+      altitudeFt: altFt != null ? Math.round(altFt) : null,
+      speedKts: speedKts != null ? Math.round(speedKts) : null,
+      speedMph: speedKts != null ? Math.round(speedKts * 1.151) : null,
+      heading: heading != null ? Math.round(heading) : null,
+      verticalRate: 0,
+      distHomeMi: Math.round(dHome * 10) / 10,
+      distKGRRMi: Math.round(dKGRR * 10) / 10,
+      bearingFromHome: Math.round(bHome),
+      compassFromHome: compass(bHome),
+      squawk: null,
+      status,
+      isKGRR: status !== 'TRANSITING',
+      isTracked: TRACKED_REGS.includes((registration || '').toUpperCase()),
+      onGround,
+      runway,
+      routeOrigin,
+      routeDest,
+      lat, lon,
+      icao: hex
+    });
+  }
+  return flights;
+}
+
+// ============================================
 // Poll Flight Data
 // ============================================
 async function pollFlights() {
   let flights = [];
-  let source = null;
   let totalInArea = 0;
 
-  // Expand search radius until we find at least one airborne flight
+  // ── Step 1: FR24 primary — all GRR flights with on_ground, routes ──
+  await pollRoutes(); // refreshes routeCache + fr24RawFeed
+  const fr24Flights = processFR24Feed(fr24RawFeed);
+
+  // ── Step 2: adsb.lol supplement — area search for nearby flights ──
+  let adsbFlights = [];
+  let adsbByHex = {};
   let searchDist = SEARCH_DIST_NM;
-  while (searchDist <= SEARCH_DIST_MAX_NM) {
-    try {
-      const data = await fetchJSON(`https://api.adsb.lol/v2/lat/${HOME.lat}/lon/${HOME.lon}/dist/${searchDist}`);
-      flights = processAdsbLol(data.ac || []);
-      totalInArea = (data.ac || []).length;
-      source = 'adsb.lol';
-      if (flights.length > 0) break;
-      searchDist += SEARCH_DIST_STEP_NM;
-    } catch (err) {
-      console.error(`[${ts()}] adsb.lol failed at ${searchDist}nm: ${err.message}`);
-      // Try OpenSky as fallback at base distance only
-      try {
-        const b = { lamin: HOME.lat - 0.72, lamax: HOME.lat + 0.72, lomin: HOME.lon - 1.0, lomax: HOME.lon + 1.0 };
-        const data = await fetchJSON(`https://opensky-network.org/api/states/all?lamin=${b.lamin}&lamax=${b.lamax}&lomin=${b.lomin}&lomax=${b.lomax}`);
-        flights = processOpenSky(data.states || []);
-        totalInArea = (data.states || []).length;
-        source = 'opensky';
-      } catch (err2) {
-        console.error(`[${ts()}] OpenSky also failed: ${err2.message}`);
-        flightData = { ...flightData, error: 'Flight data APIs unavailable', lastUpdate: new Date().toISOString() };
-        return;
+  try {
+    const data = await fetchJSON(`https://api.adsb.lol/v2/lat/${HOME.lat}/lon/${HOME.lon}/dist/${searchDist}`);
+    adsbFlights = processAdsbLol(data.ac || []);
+    totalInArea = (data.ac || []).length;
+    adsbByHex = {};
+    // Also build raw adsb.lol map for enrichment (vertical rate, squawk)
+    (data.ac || []).forEach(ac => {
+      if (ac.hex) adsbByHex[ac.hex.toLowerCase()] = ac;
+    });
+  } catch (err) {
+    console.error(`[${ts()}] adsb.lol area search failed: ${err.message}`);
+  }
+
+  // ── Step 3: Merge — FR24 flights take priority, enriched with adsb.lol ──
+  const mergedMap = new Map(); // icao -> flight
+
+  // Add FR24 flights first (primary source)
+  fr24Flights.forEach(f => {
+    // Enrich with adsb.lol data (vertical rate, squawk)
+    const adsb = adsbByHex[f.icao];
+    if (adsb) {
+      f.verticalRate = adsb.baro_rate ? Math.round(adsb.baro_rate) : f.verticalRate;
+      f.squawk = adsb.squawk || f.squawk;
+      // Use adsb.lol altitude if FR24 reports 0 but plane is airborne
+      if (f.altitudeFt === 0 && !f.onGround && typeof adsb.alt_baro === 'number') {
+        f.altitudeFt = Math.round(adsb.alt_baro);
       }
-      break;
+    }
+    mergedMap.set(f.icao, f);
+  });
+
+  // Add adsb.lol flights that FR24 doesn't have (transiting, non-GRR)
+  adsbFlights.forEach(f => {
+    if (!mergedMap.has(f.icao)) {
+      mergedMap.set(f.icao, f);
+    }
+  });
+
+  flights = Array.from(mergedMap.values());
+  if (totalInArea === 0) totalInArea = flights.length;
+
+  // ── Step 4: Tracked planes — FR24 by reg, then adsb.lol fallback ──
+  const existingRegs = new Set(flights.map(f => f.registration).filter(Boolean));
+  const missingRegs = TRACKED_REGS.filter(r => !existingRegs.has(r));
+  if (missingRegs.length > 0) {
+    // Try FR24 first (better coverage)
+    const fr24Results = await Promise.all(missingRegs.map(reg =>
+      fetchJSON(`https://data-cloud.flightradar24.com/zones/fcgi/feed.js?reg=${reg}`)
+        .then(data => processFR24Feed(data))
+        .catch(() => [])
+    ));
+    const fr24Extra = fr24Results.flat();
+    const existHex = new Set(flights.map(f => f.icao));
+    fr24Extra.forEach(f => { if (!existHex.has(f.icao)) flights.push(f); });
+
+    // adsb.lol fallback for any still missing
+    const stillMissing = missingRegs.filter(r =>
+      !fr24Extra.find(f => (f.registration || '').toUpperCase() === r)
+    );
+    if (stillMissing.length > 0) {
+      const adsbResults = await Promise.all(stillMissing.map(reg =>
+        fetchJSON(`https://api.adsb.lol/v2/reg/${reg}`).then(d => d.ac || []).catch(() => [])
+      ));
+      const adsbExtra = processAdsbLol(adsbResults.flat());
+      const existHex2 = new Set(flights.map(f => f.icao));
+      adsbExtra.forEach(f => { if (!existHex2.has(f.icao)) flights.push(f); });
     }
   }
 
-  // Fetch tracked planes individually (may be outside area search radius)
-  if (source === 'adsb.lol') {
-    const existingRegs = new Set(flights.map(f => f.registration).filter(Boolean));
-    const missingRegs = TRACKED_REGS.filter(r => !existingRegs.has(r));
-    if (missingRegs.length > 0) {
-      const results = await Promise.all(missingRegs.map(reg =>
-        fetchJSON(`https://api.adsb.lol/v2/reg/${reg}`).then(d => d.ac || []).catch(() => [])
-      ));
-      const extra = processAdsbLol(results.flat());
-      const existingHex = new Set(flights.map(f => f.icao));
-      extra.forEach(f => { if (!existingHex.has(f.icao)) flights.push(f); });
-    }
-    // Mark any flights already found in area search as tracked
-    flights.forEach(f => { if (TRACKED_REGS.includes((f.registration || '').toUpperCase())) f.isTracked = true; });
-  }
+  // Mark tracked flights
+  flights.forEach(f => { if (TRACKED_REGS.includes((f.registration || '').toUpperCase())) f.isTracked = true; });
 
   // Sort ALL flights by distance to house — there's always a closest plane
   const allByHome = flights.sort((a, b) => a.distHomeMi - b.distHomeMi);
@@ -452,31 +718,44 @@ async function pollFlights() {
     if (!activeIcaos.has(icao)) { delete lastPositions[icao]; delete lastPositionChange[icao]; }
   }
 
-  // Closest is nearest plane to house, but skip:
-  // 1. Landed planes (within 2mi of KGRR and below 500ft)
-  // 2. Stale final planes (on final approach + no position update in 10s)
+  // Accumulate server-side trails for all flights
+  allByHome.forEach(f => {
+    if (!serverTrails[f.icao]) serverTrails[f.icao] = [];
+    const trail = serverTrails[f.icao];
+    const last = trail[trail.length - 1];
+    if (!last || last[0] !== f.lat || last[1] !== f.lon) {
+      trail.push([f.lat, f.lon, f.altitudeFt || 0]);
+      if (trail.length > MAX_TRAIL_POINTS) trail.shift();
+    }
+  });
+  // Clean up trails for planes no longer seen
+  for (const icao of Object.keys(serverTrails)) {
+    if (!activeIcaos.has(icao)) delete serverTrails[icao];
+  }
+
+  // Closest is nearest airborne plane to house
+  // Skip: landed/on-ground planes, stale finals
   let closest = null;
   for (const f of allByHome) {
-    // KGRR field elevation ~794ft MSL — compute AGL
-    const agl = f.altitudeFt != null ? f.altitudeFt - 794 : null;
-    // Landed: near ground at KGRR, or very slow near KGRR (taxi/ground roll)
-    const landed = (f.distKGRRMi < 2 && agl != null && agl < 200) ||
-                   (f.distKGRRMi < 3 && f.speedKts != null && f.speedKts < 60);
-    if (landed) continue;
+    // Use FR24 on_ground flag (authoritative) or AGL heuristic
+    if (f.onGround || f.status === 'LANDED') continue;
+    // Also skip very slow planes near KGRR (taxi/ground roll not caught by FR24)
+    if (f.distKGRRMi < 3 && f.speedKts != null && f.speedKts < 60) continue;
     // Stale on final approach (no position update in 7s)
+    const agl = f.altitudeFt != null ? f.altitudeFt - 794 : null;
     const onFinal = f.status === 'ARRIVING' && f.distKGRRMi < 5 && agl != null && agl < 2200;
     const staleSec = (now - (lastPositionChange[f.icao] || now)) / 1000;
     if (onFinal && staleSec >= 7) continue;
     closest = f; break;
   }
-  if (!closest) closest = allByHome[0] || null;
+  if (!closest) closest = allByHome.find(f => !f.onGround) || allByHome[0] || null;
 
   // Build priority flights list:
-  // - All airborne tracked planes
-  // - Closest KGRR flight (first ARRIVING/DEPARTING by distance to KGRR)
+  // - All airborne tracked planes (not on ground)
+  // - Closest airborne KGRR flight
   // If no tracked planes airborne, fall back to closest-to-home
-  const trackedAirborne = allByHome.filter(f => f.isTracked);
-  const closestKGRR = kgrrFlights.sort((a, b) => a.distKGRRMi - b.distKGRRMi)[0] || null;
+  const trackedAirborne = allByHome.filter(f => f.isTracked && !f.onGround);
+  const closestKGRR = kgrrFlights.filter(f => !f.onGround).sort((a, b) => a.distKGRRMi - b.distKGRRMi)[0] || null;
 
   let priorityFlights = [];
   if (trackedAirborne.length > 0) {
@@ -490,10 +769,10 @@ async function pollFlights() {
     if (closest) priorityFlights = [closest];
   }
 
-  // Fetch photos for all priority flights
+  // Fetch photos and attach trails for all priority flights
   const photoPromises = priorityFlights.map(async f => {
-    const p = await getPhoto(f.icao);
-    return { ...f, photo: p };
+    const p = await getPhoto(f.icao, f.registration);
+    return { ...f, photo: p, trail: serverTrails[f.icao] || [] };
   });
   const priorityWithPhotos = await Promise.all(photoPromises);
 
@@ -501,30 +780,85 @@ async function pollFlights() {
   let closestPhoto = null;
   if (closest) {
     const existing = priorityWithPhotos.find(f => f.icao === closest.icao);
-    closestPhoto = existing ? existing.photo : await getPhoto(closest.icao);
+    closestPhoto = existing ? existing.photo : await getPhoto(closest.icao, closest.registration);
   }
 
   // Fetch weather (non-blocking)
   const weather = await getWeather();
 
+  // Update last-seen data for tracked planes whenever visible
+  allByHome.forEach(f => {
+    if (!f.isTracked) return;
+    const reg = (f.registration || '').toUpperCase();
+    if (!reg) return;
+    // Determine likely airport: dest if arriving/landed, origin if departing, or nearest by position
+    let airport = null;
+    if (f.routeDest && (f.status === 'ARRIVING' || f.status === 'LANDED')) airport = f.routeDest;
+    else if (f.routeOrigin && f.status === 'DEPARTING') airport = f.routeOrigin;
+    else if (f.routeDest) airport = f.routeDest; // best guess = destination
+    trackedLastSeen[reg] = {
+      routeOrigin: f.routeOrigin,
+      routeDest: f.routeDest,
+      airport,
+      lat: f.lat, lon: f.lon,
+      altitudeFt: f.altitudeFt,
+      ts: Date.now()
+    };
+  });
+  // Persist to disk
+  try { fs.writeFileSync(TRACKED_CACHE_FILE, JSON.stringify(trackedLastSeen)); } catch (e) {}
+
+  // Build tracked plane status (even when not airborne)
+  const trackedStatus = TRACKED_REGS.map(reg => {
+    const flight = allByHome.find(f => (f.registration || '').toUpperCase() === reg);
+    const lastSeen = trackedLastSeen[reg] || null;
+    return {
+      registration: reg,
+      airborne: !!flight && !flight.onGround,
+      onGround: flight ? flight.onGround : false,
+      lastSeen: !flight && lastSeen ? {
+        airport: lastSeen.airport || lastSeen.routeDest,
+        routeOrigin: lastSeen.routeOrigin,
+        routeDest: lastSeen.routeDest,
+        ago: Math.round((Date.now() - lastSeen.ts) / 60000) // minutes ago
+      } : null,
+      flight: flight ? {
+        flightNumber: flight.flightNumber,
+        airline: flight.airline,
+        aircraftType: flight.aircraftType,
+        typeCode: flight.typeCode,
+        altitudeFt: flight.altitudeFt,
+        distHomeMi: flight.distHomeMi,
+        status: flight.status,
+        routeOrigin: flight.routeOrigin,
+        routeDest: flight.routeDest,
+        runway: flight.runway
+      } : null
+    };
+  });
+
+  const landedCount = allByHome.filter(f => f.status === 'LANDED').length;
+
   flightData = {
-    closest: closest ? { ...closest, photo: closestPhoto } : null,
+    closest: closest ? { ...closest, photo: closestPhoto, trail: serverTrails[closest.icao] || [] } : null,
     priorityFlights: priorityWithPhotos,
     flights: allByHome,
+    trackedStatus,
     totalInArea,
     kgrrCount: kgrrFlights.length,
+    landedCount,
     lastUpdate: new Date().toISOString(),
-    source,
+    source: 'FR24+adsb.lol',
     error: null,
     weather
   };
 
   const trackedStr = trackedAirborne.length > 0 ? ` | tracked: ${trackedAirborne.map(f => f.registration).join(',')}` : '';
-  const distStr = searchDist > SEARCH_DIST_NM ? ` (${searchDist}nm)` : '';
+  const landedStr = landedCount > 0 ? ` | landed: ${landedCount}` : '';
   if (closest) {
-    console.log(`[${ts()}] ${allByHome.length} aircraft${distStr} | priority: ${priorityWithPhotos.length}${trackedStr} | closest: ${closest.flightNumber} ${closest.distHomeMi}mi`);
+    console.log(`[${ts()}] FR24:${fr24Flights.length} adsb:${adsbFlights.length} merged:${allByHome.length}${landedStr} | priority: ${priorityWithPhotos.length}${trackedStr} | closest: ${closest.flightNumber} ${closest.distHomeMi}mi`);
   } else {
-    console.log(`[${ts()}] No aircraft within ${searchDist}nm`);
+    console.log(`[${ts()}] FR24:${fr24Flights.length} adsb:${adsbFlights.length} — no airborne flights`);
   }
 }
 
@@ -561,6 +895,20 @@ http.createServer((req, res) => {
   } else if (req.url === '/api/weather') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(flightData.weather));
+  } else if (req.url.startsWith('/api/weather/')) {
+    const icao = req.url.split('/api/weather/')[1].split('?')[0].toUpperCase();
+    if (!icao || !/^[A-Z]{3,4}$/.test(icao)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid ICAO code' }));
+    } else {
+      getWeather(icao).then(wx => {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(wx));
+      }).catch(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(null));
+      });
+    }
   } else if (req.url.startsWith('/api/atc/')) {
     const stream = req.url.split('/api/atc/')[1];
     const mounts = { clearance:'kgrr2_2_del', ground:'kgrr2_2_gnd', tower:'kgrr2_2_twr', approach:'kgrr2_2_app' };
@@ -592,9 +940,16 @@ http.createServer((req, res) => {
       streamReq.on('timeout', () => { streamReq.destroy(); if (!res.headersSent) { res.writeHead(504); res.end('Stream timeout'); } });
     }
     pipeStream(streamUrl);
+  } else if (req.url === '/api/flyins') {
+    // Serve fly-in event data (static, from 2026 Michigan Fly-ins spreadsheet)
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' });
+    res.end(JSON.stringify({ airports: 45, events: 60, year: 2026, source: '2026 Michigan Fly-ins' }));
   } else if (req.url.startsWith('/api/photo/')) {
-    const icao = req.url.split('/api/photo/')[1];
-    getPhoto(icao).then(photo => {
+    const parts = req.url.split('/api/photo/')[1].split('?');
+    const icao = parts[0];
+    const params = new URLSearchParams(parts[1] || '');
+    const reg = params.get('reg') || null;
+    getPhoto(icao, reg).then(photo => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(photo));
     }).catch(() => {
