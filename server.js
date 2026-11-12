@@ -6,7 +6,7 @@ const path = require('path');
 // ============================================
 // Configuration
 // ============================================
-const PORT = 3000;
+const PORT = process.env.PORT || 3024;
 const HOME = { lat: 42.8703, lon: -85.4666 };
 const KGRR = { lat: 42.8808, lon: -85.5228 };
 const POLL_INTERVAL = 8000;
